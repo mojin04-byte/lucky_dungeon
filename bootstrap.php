@@ -202,3 +202,106 @@ try {
 } catch (\PDOException $e) {
     error_log("유물 시스템 마이그레이션 실패: " . $e->getMessage());
 }
+
+// ==========================================
+// 추가 마이그레이션 (탐색 이벤트 카탈로그)
+// ==========================================
+try {
+    if (!table_exists($pdo, 'tb_explore_events')) {
+        $pdo->exec("CREATE TABLE `tb_explore_events` (
+            `event_id` INT AUTO_INCREMENT PRIMARY KEY,
+            `event_code` VARCHAR(60) NOT NULL,
+            `event_type` VARCHAR(30) NOT NULL,
+            `event_title` VARCHAR(120) NOT NULL,
+            `ai_seed` TEXT NULL,
+            `weight` INT NOT NULL DEFAULT 10,
+            `min_floor` INT NOT NULL DEFAULT 1,
+            `max_floor` INT NOT NULL DEFAULT 9999,
+            `is_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uniq_event_code` (`event_code`),
+            KEY `idx_event_lookup` (`is_enabled`, `min_floor`, `max_floor`, `event_type`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT '탐색 이벤트 카탈로그';");
+    }
+
+    $eventCount = (int)$pdo->query("SELECT COUNT(*) FROM tb_explore_events")->fetchColumn();
+    if ($eventCount < 200) {
+        $pdo->beginTransaction();
+        $pdo->exec("DELETE FROM tb_explore_events");
+
+        $encounterSeeds = array(
+            '칼날 같은 살기가 통로를 가르며 짙게 번진다.',
+            '어둠 속 발소리가 겹쳐 울리며 접근한다.',
+            '금속성 숨소리가 벽을 타고 스며든다.',
+            '핏빛 기운이 천천히 시야를 잠식한다.',
+            '잔해 사이에서 적의 눈빛이 번쩍인다.',
+            '정적이 깨지며 포효가 복도를 울린다.',
+            '발밑의 그림자가 갑자기 길게 늘어진다.',
+            '낮은 울음과 함께 괴이한 형체가 드러난다.'
+        );
+        $goldSeeds = array(
+            '깨진 석판 틈에서 금빛이 번쩍인다.',
+            '낡은 주머니가 바닥에서 굴러 나온다.',
+            '무너진 벽돌 뒤편에 숨은 전리품을 찾았다.',
+            '먼지 속에서 반짝이는 동전 더미가 드러난다.',
+            '누군가 놓고 간 보급 상자가 발견되었다.'
+        );
+        $chestSeeds = array(
+            '봉인 문양이 새겨진 상자가 덜컥 열린다.',
+            '녹슨 자물쇠를 부수자 묵직한 상자가 모습을 드러낸다.',
+            '함정 해제 후 보물 상자 내부가 드러난다.',
+            '짙은 먼지를 털어내니 고대 상자가 열렸다.',
+            '쇳조각 더미 밑에서 잠긴 상자를 찾아냈다.'
+        );
+        $trapSeeds = array(
+            '바닥 문양이 붉게 빛나며 함정이 작동한다.',
+            '천장 톱니가 내려오며 경고음을 낸다.',
+            '독침 장치가 벽면에서 튀어나온다.',
+            '붕괴 경보와 함께 발밑 지반이 흔들린다.',
+            '숨겨진 마법진이 발목을 붙잡는다.'
+        );
+        $manaSeeds = array(
+            '푸른 샘물이 은은한 빛을 내며 흐른다.',
+            '마나 입자가 공기 중에서 서서히 응집된다.',
+            '고요한 샘에서 신비한 파동이 번진다.',
+            '균열 틈에서 맑은 마력이 솟아오른다.',
+            '짙은 안개가 걷히며 마나의 샘이 모습을 드러낸다.'
+        );
+
+        $insert = $pdo->prepare("INSERT INTO tb_explore_events (event_code, event_type, event_title, ai_seed, weight, min_floor, max_floor, is_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, 1)");
+
+        // 총 200개: 전투 120(60%), 골드 28, 상자 22, 함정 18, 마나의샘 12
+        for ($i = 1; $i <= 120; $i++) {
+            $title = '적 조우 #' . str_pad((string)$i, 3, '0', STR_PAD_LEFT);
+            $seed = $encounterSeeds[$i % count($encounterSeeds)] . ' 전투 태세를 갖춰라.';
+            $insert->execute(array('ENCOUNTER_' . str_pad((string)$i, 3, '0', STR_PAD_LEFT), 'encounter', $title, $seed, 10, 1, 9999));
+        }
+        for ($i = 1; $i <= 28; $i++) {
+            $title = '골드 발견 #' . str_pad((string)$i, 3, '0', STR_PAD_LEFT);
+            $seed = $goldSeeds[$i % count($goldSeeds)];
+            $insert->execute(array('GOLD_' . str_pad((string)$i, 3, '0', STR_PAD_LEFT), 'gold', $title, $seed, 10, 1, 9999));
+        }
+        for ($i = 1; $i <= 22; $i++) {
+            $title = '상자 발견 #' . str_pad((string)$i, 3, '0', STR_PAD_LEFT);
+            $seed = $chestSeeds[$i % count($chestSeeds)];
+            $insert->execute(array('CHEST_' . str_pad((string)$i, 3, '0', STR_PAD_LEFT), 'chest', $title, $seed, 10, 1, 9999));
+        }
+        for ($i = 1; $i <= 18; $i++) {
+            $title = '함정 작동 #' . str_pad((string)$i, 3, '0', STR_PAD_LEFT);
+            $seed = $trapSeeds[$i % count($trapSeeds)];
+            $insert->execute(array('TRAP_' . str_pad((string)$i, 3, '0', STR_PAD_LEFT), 'trap', $title, $seed, 10, 1, 9999));
+        }
+        for ($i = 1; $i <= 12; $i++) {
+            $title = '마나의 샘 #' . str_pad((string)$i, 3, '0', STR_PAD_LEFT);
+            $seed = $manaSeeds[$i % count($manaSeeds)];
+            $insert->execute(array('MANA_' . str_pad((string)$i, 3, '0', STR_PAD_LEFT), 'mana_spring', $title, $seed, 10, 1, 9999));
+        }
+
+        $pdo->commit();
+    }
+} catch (\PDOException $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    error_log("탐색 이벤트 카탈로그 마이그레이션 실패: " . $e->getMessage());
+}

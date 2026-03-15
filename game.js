@@ -338,6 +338,9 @@ async function sendAction(actionType) {
                 if (data.story_event) showStoryModal(data.story_event);
                 if (data.status === 'encounter' || data.status === 'safe') {
                     document.getElementById('floor-display').innerText = data.new_floor;
+                    if (data.status === 'encounter') {
+                        addLog(`⚠️ 전투 대상 확인: <b>[${data.mob_name}]</b> (HP ${data.mob_max_hp})`, true);
+                    }
                     if (data.status === 'safe') {
                         updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
                     }
@@ -346,6 +349,10 @@ async function sendAction(actionType) {
                         const logBox = document.getElementById('game-log');
                         const lastLog = logBox.lastElementChild;
                         if (lastLog && lastLog.innerText.includes('AI 묘사 대기 중')) logBox.removeChild(lastLog);
+
+                        if (data.event_title && data.event_type) {
+                            addLog(`🧭 <b>[${data.event_title}]</b> (${data.event_type})`, true);
+                        }
 
                         const streamLog = document.createElement('div');
                         streamLog.className = 'log-entry system';
