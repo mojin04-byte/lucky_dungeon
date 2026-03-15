@@ -86,23 +86,46 @@ function addLog(message, isSystem = false) {
     logBox.scrollTop = logBox.scrollHeight;
 }
 
-function addTurnDamageBreakdown(data) {
+function getTurnDamageLines(data) {
+    const lines = [];
     const details = (data && Array.isArray(data.turn_damage_details)) ? data.turn_damage_details : [];
     if (details.length > 0) {
         for (const item of details) {
             const name = String((item && item.name) || '영웅');
             const dmg = Number((item && item.damage) || 0);
-            addLog(`${name}의 공격이 <b style='color:#ffb74d;'>${dmg}</b>의 데미지를 입혔습니다.`, true);
+            lines.push(`${name}의 공격이 <b style='color:#ffb74d;'>${dmg}</b>의 데미지를 입혔습니다.`);
         }
-        return;
+        return lines;
     }
 
     const p = Number((data && data.player_dmg) || 0);
     const h = Number((data && data.hero_dmg) || 0);
-    addLog(`사령관의 공격이 <b style='color:#ffb74d;'>${p}</b>의 데미지를 입혔습니다.`, true);
-    if (h > 0) {
-        addLog(`영웅들의 공격이 <b style='color:#81d4fa;'>${h}</b>의 데미지를 입혔습니다.`, true);
-    }
+    lines.push(`사령관의 공격이 <b style='color:#ffb74d;'>${p}</b>의 데미지를 입혔습니다.`);
+    if (h > 0) lines.push(`영웅들의 공격이 <b style='color:#81d4fa;'>${h}</b>의 데미지를 입혔습니다.`);
+    return lines;
+}
+
+function getStatusEffectLines(data) {
+    const lines = (data && Array.isArray(data.status_effect_logs)) ? data.status_effect_logs : [];
+    return lines.map((line) => `🧪 <span style='display:inline-block; padding:2px 8px; border-radius:10px; background:#3b1f1f; color:#ffb3b3; border:1px solid #ff5252; font-weight:bold;'>상태이상</span> <span style='color:#ffd7d7;'>${line}</span>`);
+}
+
+function renderTurnScriptBlock(targetEl, data) {
+    if (!targetEl) return;
+    const damageLines = getTurnDamageLines(data);
+    const statusLines = getStatusEffectLines(data);
+    const allLines = damageLines.concat(statusLines);
+    if (allLines.length === 0) return;
+
+    const textEl = targetEl.querySelector('.stream-text');
+    if (!textEl) return;
+    textEl.innerHTML = allLines.join('<br>') + '<br>';
+}
+
+function addTurnDamageBreakdown(data) {
+    const damageLines = getTurnDamageLines(data);
+    const statusLines = getStatusEffectLines(data);
+    for (const line of damageLines.concat(statusLines)) addLog(line, true);
 }
 
 function formatAiBadge(meta) {
@@ -287,7 +310,7 @@ async function doCombatTurn() {
                     streamLog.innerHTML = "<span style='color:#ff5252; font-weight:bold;'>[전투 스크립트 ✨]</span><br><span class='stream-text'></span>";
                     logBox.appendChild(streamLog);
 
-                    addTurnDamageBreakdown(data);
+                    renderTurnScriptBlock(streamLog, data);
 
                     logBox.scrollTop = logBox.scrollHeight;
                     const textSpan = streamLog.querySelector('.stream-text');

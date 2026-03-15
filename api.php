@@ -203,6 +203,18 @@ function cleanup_combat_if_stale(PDO $pdo, $uid, &$cmd) {
 	$cmd['is_combat'] = 0;
 }
 
+function extract_status_effect_logs($logs) {
+	$out = array();
+	foreach ($logs as $line) {
+		$plain = trim(strip_tags((string)$line));
+		if ($plain === '') continue;
+		if (preg_match('/상태이상|행동하지 못|보호막|막아냈|기절|스턴|빙결|중독|출혈|약화|침묵|감속/u', $plain)) {
+			$out[] = $plain;
+		}
+	}
+	return array_values(array_unique($out));
+}
+
 function estimate_expected_turn_damage(PDO $pdo, $uid, $cmd) {
 	$p_str = (int)$cmd['stat_str'];
 	$p_luk = (int)$cmd['stat_luk'];
@@ -735,6 +747,7 @@ function handle_combat(PDO $pdo) {
 		}
 
 		$final_log = implode('<br>', $logs);
+		$status_effect_logs = extract_status_effect_logs($logs);
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $final_log));
 		$_SESSION['ai_stream_text'] = strip_tags($final_log);
 		$_SESSION['combat_stream_text'] = strip_tags($final_log);
@@ -744,6 +757,7 @@ function handle_combat(PDO $pdo) {
 			'status' => $status,
 			'stream' => true,
 			'logs' => $logs,
+			'status_effect_logs' => $status_effect_logs,
 			'turn_damage_details' => $turn_damage_details,
 			'player_dmg' => (int)$player_dmg,
 			'player_crit' => (bool)$is_crit,
