@@ -87,6 +87,16 @@ function addLog(message, isSystem = false) {
 }
 
 function addTurnDamageBreakdown(data) {
+    const details = (data && Array.isArray(data.turn_damage_details)) ? data.turn_damage_details : [];
+    if (details.length > 0) {
+        for (const item of details) {
+            const name = String((item && item.name) || '영웅');
+            const dmg = Number((item && item.damage) || 0);
+            addLog(`${name}의 공격이 <b style='color:#ffb74d;'>${dmg}</b>의 데미지를 입혔습니다.`, true);
+        }
+        return;
+    }
+
     const p = Number((data && data.player_dmg) || 0);
     const h = Number((data && data.hero_dmg) || 0);
     addLog(`사령관의 공격이 <b style='color:#ffb74d;'>${p}</b>의 데미지를 입혔습니다.`, true);
@@ -115,6 +125,9 @@ function setBattleStage(stage, mobName = '', mobMaxHp = 0) {
 
     if (mobName) window.currentMobName = mobName;
     if (mobMaxHp) window.currentMobMaxHp = mobMaxHp;
+    if (window.currentMobHp === undefined || window.currentMobHp === null) {
+        window.currentMobHp = window.currentMobMaxHp || 0;
+    }
 
     if (stage === BATTLE_STAGE.DEAD) {
         show('dead-actions', true);
@@ -143,8 +156,10 @@ function setBattleStage(stage, mobName = '', mobMaxHp = 0) {
         show('combat-actions', false);
         show('monster-ui', true);
         document.getElementById('mob-name-display').innerText = window.currentMobName || '몬스터';
-        document.getElementById('mob-hp-text').innerText = `${window.currentMobMaxHp}/${window.currentMobMaxHp}`;
-        document.getElementById('mob-hp-bar').style.width = '100%';
+        const nowHp = Math.max(0, Math.min(Number(window.currentMobHp || 0), Number(window.currentMobMaxHp || 0)));
+        const maxHp = Math.max(1, Number(window.currentMobMaxHp || 1));
+        document.getElementById('mob-hp-text').innerText = `${nowHp}/${maxHp}`;
+        document.getElementById('mob-hp-bar').style.width = (nowHp / maxHp * 100) + '%';
         return;
     }
 
@@ -156,8 +171,10 @@ function setBattleStage(stage, mobName = '', mobMaxHp = 0) {
         show('monster-ui', true);
         document.getElementById('mob-name-display').innerText = window.currentMobName || '몬스터';
         if (window.currentMobMaxHp > 0) {
-            document.getElementById('mob-hp-text').innerText = `${window.currentMobMaxHp}/${window.currentMobMaxHp}`;
-            document.getElementById('mob-hp-bar').style.width = '100%';
+            const nowHp = Math.max(0, Math.min(Number(window.currentMobHp || 0), Number(window.currentMobMaxHp || 0)));
+            const maxHp = Math.max(1, Number(window.currentMobMaxHp || 1));
+            document.getElementById('mob-hp-text').innerText = `${nowHp}/${maxHp}`;
+            document.getElementById('mob-hp-bar').style.width = (nowHp / maxHp * 100) + '%';
         }
     }
 }
@@ -184,6 +201,7 @@ function exitToExploreState() {
 
 function enterEncounterState(mobName, mobMaxHp) {
     window.isCombat = true;
+    window.currentMobHp = mobMaxHp;
     setBattleStage(BATTLE_STAGE.ENCOUNTER, mobName, mobMaxHp);
     if (mobName.includes('[보스]')) {
         document.body.classList.add('boss-bg');
@@ -193,6 +211,7 @@ function enterEncounterState(mobName, mobMaxHp) {
 
 function enterCombatState(mobName, mobMaxHp) {
     window.isCombat = true;
+    if (!window.currentMobHp || window.currentMobHp <= 0) window.currentMobHp = mobMaxHp;
     setBattleStage(BATTLE_STAGE.COMBAT, mobName, mobMaxHp);
     if (isAutoMode) doCombatTurn();
 }
@@ -254,6 +273,8 @@ async function doCombatTurn() {
             isProcessingTurn = false;
         } else {
             updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
+            window.currentMobHp = Number(data.mob_hp || 0);
+            window.currentMobMaxHp = Number(data.mob_max_hp || window.currentMobMaxHp || 1);
             document.getElementById('mob-hp-text').innerText = `${data.mob_hp}/${data.mob_max_hp}`;
             document.getElementById('mob-hp-bar').style.width = (data.mob_hp / data.mob_max_hp * 100) + '%';
             if (data.new_level) updateExpBar(data.new_level, data.new_exp);
@@ -453,6 +474,7 @@ async function useSkill(skillId) {
             }
             updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
             if (data.mob_hp !== undefined) {
+                window.currentMobHp = Number(data.mob_hp || 0);
                 document.getElementById('mob-hp-text').innerText = `${data.mob_hp}/${window.currentMobMaxHp}`;
                 document.getElementById('mob-hp-bar').style.width = (data.mob_hp / window.currentMobMaxHp * 100) + '%';
             }

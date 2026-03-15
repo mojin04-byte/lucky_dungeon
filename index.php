@@ -300,6 +300,7 @@ try {
         window.isDead = <?= ($commander['hp'] <= 0) ? 'true' : 'false' ?>;
         window.isCombat = <?= ($commander['is_combat'] == 1) ? 'true' : 'false' ?>;
         window.currentMobName = <?= json_encode($commander['mob_name'] ?? '') ?>;
+        window.currentMobHp = <?= (int)$commander['mob_hp'] ?>;
         window.currentMobMaxHp = <?= (int)$commander['mob_max_hp'] ?>;
         // 초기 스탯 포인트 버튼 갱신을 위해 DOM 로드 후 실행될 JS에 값 전달
         window.initialStatPoints = <?= (int)($commander['stat_points'] ?? 0) ?>;

@@ -601,6 +601,8 @@ function handle_combat(PDO $pdo) {
 		$new_mob_hp = (int)$cmd['mob_hp'];
 		$new_hp = (int)$cmd['hp'];
 		$total_hero_turn_damage = 0;
+		$turn_damage_details = array();
+		$hero_damage_map = array();
 		$hero_crit_hits = 0;
 		$max_hit_hero_name = '';
 		$max_hit_hero_dmg = 0;
@@ -637,6 +639,7 @@ function handle_combat(PDO $pdo) {
 		if ($relic_atk_bonus > 0) $player_base = (int)floor($player_base * (1 + ($relic_atk_bonus / 100)));
 		$is_crit = (rand(1, 100) <= $crit_chance);
 		$player_dmg = $is_crit ? floor($player_base * $crit_mult) : $player_base;
+		$turn_damage_details[] = array('name' => '사령관', 'damage' => (int)$player_dmg);
 		$crit_txt = $is_crit ? "💥 <span style='color:#ffeb3b; font-weight:bold;'>[치명타!]</span> " : "";
 		$logs[] = "{$crit_txt}🗡️ <b>[사령관]</b>의 공격! <b>{$cmd['mob_name']}</b>에게 <span style='color:#ff9800;'>{$player_dmg}</span> 피해.";
 		$new_mob_hp = max(0, $new_mob_hp - $player_dmg);
@@ -676,6 +679,8 @@ function handle_combat(PDO $pdo) {
 					$hcrit = $is_h_crit ? "⚡ <span style='color:yellow; font-weight:bold;'>[치명타]</span> " : "⚔️ ";
 					$logs[] = "{$hcrit}<span style='color:{$r[2]}'>[{$hero['hero_name']}]</span>(x{$hero_count})의 공격. {$hero_dmg} 피해.";
 					$total_hero_turn_damage += (int)$hero_dmg;
+					if (!isset($hero_damage_map[$hero['hero_name']])) $hero_damage_map[$hero['hero_name']] = 0;
+					$hero_damage_map[$hero['hero_name']] += (int)$hero_dmg;
 					if ((int)$hero_dmg > $max_hit_hero_dmg) {
 						$max_hit_hero_dmg = (int)$hero_dmg;
 						$max_hit_hero_name = $hero['hero_name'];
@@ -687,6 +692,9 @@ function handle_combat(PDO $pdo) {
 
 		if ($total_gold_gain > 0) {
 			$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($total_gold_gain, $uid));
+		}
+		foreach ($hero_damage_map as $hero_name => $hero_damage) {
+			$turn_damage_details[] = array('name' => (string)$hero_name, 'damage' => (int)$hero_damage);
 		}
 
 		if ($new_mob_hp <= 0) {
@@ -736,6 +744,7 @@ function handle_combat(PDO $pdo) {
 			'status' => $status,
 			'stream' => true,
 			'logs' => $logs,
+			'turn_damage_details' => $turn_damage_details,
 			'player_dmg' => (int)$player_dmg,
 			'player_crit' => (bool)$is_crit,
 			'hero_dmg' => (int)$total_hero_turn_damage,
