@@ -86,6 +86,15 @@ function addLog(message, isSystem = false) {
     logBox.scrollTop = logBox.scrollHeight;
 }
 
+function addTurnDamageBreakdown(data) {
+    const p = Number((data && data.player_dmg) || 0);
+    const h = Number((data && data.hero_dmg) || 0);
+    addLog(`사령관의 공격이 <b style='color:#ffb74d;'>${p}</b>의 데미지를 입혔습니다.`, true);
+    if (h > 0) {
+        addLog(`영웅들의 공격이 <b style='color:#81d4fa;'>${h}</b>의 데미지를 입혔습니다.`, true);
+    }
+}
+
 function formatAiBadge(meta) {
     if (!meta || !meta.provider) return '[AI ✨]';
     const provider = String(meta.provider).toLowerCase();
@@ -257,10 +266,7 @@ async function doCombatTurn() {
                     streamLog.innerHTML = "<span style='color:#ff5252; font-weight:bold;'>[전투 스크립트 ✨]</span><br><span class='stream-text'></span>";
                     logBox.appendChild(streamLog);
 
-                    const playerDmg = Number(data.player_dmg || 0);
-                    const heroDmg = Number(data.hero_dmg || 0);
-                    const totalDmg = playerDmg + heroDmg;
-                    addLog(`📌 이번 턴 피해: 사령관 ${playerDmg} / 영웅 ${heroDmg} / 합계 ${totalDmg}`);
+                    addTurnDamageBreakdown(data);
 
                     logBox.scrollTop = logBox.scrollHeight;
                     const textSpan = streamLog.querySelector('.stream-text');
@@ -286,6 +292,7 @@ async function doCombatTurn() {
                     };
                     return; // SSE가 끝날 때까지 대기
                 } else {
+                    addTurnDamageBreakdown(data);
                     if (Array.isArray(data.logs)) {
                         for (const log of data.logs) addLog(log);
                     }

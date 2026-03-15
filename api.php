@@ -245,6 +245,12 @@ function estimate_expected_turn_damage(PDO $pdo, $uid, $cmd) {
 	return max(10, (int)floor($expected_turn_damage));
 }
 
+function get_total_hero_units(PDO $pdo, $uid) {
+	$st = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM tb_heroes WHERE uid = ? AND quantity > 0");
+	$st->execute(array($uid));
+	return (int)$st->fetchColumn();
+}
+
 function generate_hero_lists($heroes) {
 	$deck_html = '';
 	$inv_html = '';
@@ -263,7 +269,13 @@ function generate_hero_lists($heroes) {
 			if ((int)$h['is_on_expedition'] === 1) {
 				$card .= "<span style='color:#ff9800; font-size:0.8rem; font-weight:bold;'>[파견중]</span></div>";
 			} else {
-				$card .= "<button class='btn' style='padding:5px 10px; font-size:0.8rem;' onclick='toggleEquip({$h['inv_id']}, 1)'>출전</button></div>";
+				$card .= "<div style='display:flex; gap:6px;'>";
+				$card .= "<button class='btn' style='padding:5px 10px; font-size:0.8rem;' onclick='toggleEquip({$h['inv_id']}, 1)'>출전</button>";
+				if ($h['hero_rank'] === '일반' && (int)$h['quantity'] >= 3) {
+					$hero_name_js = json_encode($h['hero_name']);
+					$card .= "<button class='btn' style='padding:5px 10px; font-size:0.8rem; background:#2f7d32;' onclick='synthesizeHero({$hero_name_js})'>합성</button>";
+				}
+				$card .= "</div></div>";
 			}
 			$inv_html .= $card;
 		}
@@ -589,6 +601,9 @@ function handle_combat(PDO $pdo) {
 		$new_mob_hp = (int)$cmd['mob_hp'];
 		$new_hp = (int)$cmd['hp'];
 		$total_hero_turn_damage = 0;
+		$hero_crit_hits = 0;
+		$max_hit_hero_name = '';
+		$max_hit_hero_dmg = 0;
 
 		$deck_stmt = $pdo->prepare("SELECT hero_rank, hero_name, MAX(level) AS level, SUM(quantity) AS equipped_count FROM tb_heroes WHERE uid = ? AND is_equipped = 1 AND quantity > 0 GROUP BY hero_rank, hero_name");
 		$deck_stmt->execute(array($uid));
@@ -654,12 +669,17 @@ function handle_combat(PDO $pdo) {
 
 					$is_h_crit = false;
 					if (rand(1, 100) <= floor($p_luk / 2)) { $is_h_crit = true; $hero_dmg = (int)floor($hero_dmg * $crit_mult); }
+					if ($is_h_crit) $hero_crit_hits++;
 
 					apply_hero_skills($hero, $new_mob_hp, $logs, $total_gold_gain, $cmd, $hero_dmg, $is_h_crit);
 
 					$hcrit = $is_h_crit ? "⚡ <span style='color:yellow; font-weight:bold;'>[치명타]</span> " : "⚔️ ";
 					$logs[] = "{$hcrit}<span style='color:{$r[2]}'>[{$hero['hero_name']}]</span>(x{$hero_count})의 공격. {$hero_dmg} 피해.";
 					$total_hero_turn_damage += (int)$hero_dmg;
+					if ((int)$hero_dmg > $max_hit_hero_dmg) {
+						$max_hit_hero_dmg = (int)$hero_dmg;
+						$max_hit_hero_name = $hero['hero_name'];
+					}
 					$new_mob_hp = max(0, $new_mob_hp - $hero_dmg);
 				}
 			}
@@ -717,7 +737,11 @@ function handle_combat(PDO $pdo) {
 			'stream' => true,
 			'logs' => $logs,
 			'player_dmg' => (int)$player_dmg,
+			'player_crit' => (bool)$is_crit,
 			'hero_dmg' => (int)$total_hero_turn_damage,
+			'hero_crit_hits' => (int)$hero_crit_hits,
+			'max_hit_hero_name' => (string)$max_hit_hero_name,
+			'max_hit_hero_dmg' => (int)$max_hit_hero_dmg,
 			'new_hp' => $new_hp,
 			'max_hp' => (int)$cmd['max_hp'],
 			'new_mp' => (int)$cmd['mp'],
@@ -1111,6 +1135,8 @@ function handle_summon(PDO $pdo) {
 		$st->execute(array($uid));
 		$cmd = $st->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
+		$owned_total = get_total_hero_units($pdo, $uid);
+		if ($owned_total >= 30) throw new Exception('보유 영웅(출전 포함)은 최대 30명까지 가능합니다.');
 		if ((int)$cmd['gold'] < $summon_cost) throw new Exception('마력석(Gold)이 부족합니다.');
 		$pdo->prepare("UPDATE tb_commanders SET gold = gold - ? WHERE uid = ?")->execute(array($summon_cost, $uid));
 
@@ -1184,7 +1210,6 @@ function handle_synthesize(PDO $pdo) {
 	global $hero_data;
 	$uid = get_uid_or_fail();
 	$hero_name = isset($_POST['hero_name']) ? $_POST['hero_name'] : '';
-	$rank_order = array('일반', '희귀', '영웅', '전설', '신화', '불멸', '유일');
 
 	try {
 		$pdo->beginTransaction();
@@ -1192,10 +1217,8 @@ function handle_synthesize(PDO $pdo) {
 		$st->execute(array($uid, $hero_name));
 		$source = $st->fetch();
 		if (!$source || (int)$source['quantity'] < 3) throw new Exception('합성에 필요한 영웅 수량(3)이 부족합니다.');
-
-		$idx = array_search($source['hero_rank'], $rank_order, true);
-		if ($idx === false || $idx >= count($rank_order) - 1) throw new Exception('더 이상 합성할 수 없는 등급입니다.');
-		$next_rank = $rank_order[$idx + 1];
+		if ($source['hero_rank'] !== '일반') throw new Exception('합성은 일반 영웅만 가능합니다.');
+		$next_rank = '희귀';
 
 		$remain = (int)$source['quantity'] - 3;
 		if ($remain > 0) $pdo->prepare("UPDATE tb_heroes SET quantity = ? WHERE inv_id = ?")->execute(array($remain, $source['inv_id']));
