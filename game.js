@@ -70,11 +70,33 @@ function updatePlayerBars(hp, max_hp, mp, max_mp) {
     document.getElementById('player-mp-bar').style.width = (mp / max_mp * 100) + '%';
 }
 
-function updateExpBar(level, exp) {
-    const maxExp = level * 100;
+function getExpToNextByLevel(level) {
+    const lv = Math.max(1, Number(level) || 1);
+    if (lv >= 1000) return 0;
+    let mult = 2120;
+    if (lv <= 10) mult = 100;
+    else if (lv <= 20) mult = 140;
+    else if (lv <= 30) mult = 190;
+    else if (lv <= 40) mult = 250;
+    else if (lv <= 50) mult = 320;
+    else if (lv <= 100) mult = 420;
+    else if (lv <= 200) mult = 520;
+    else if (lv <= 300) mult = 680;
+    else if (lv <= 400) mult = 860;
+    else if (lv <= 500) mult = 1060;
+    else if (lv <= 650) mult = 1280;
+    else if (lv <= 800) mult = 1530;
+    else if (lv <= 900) mult = 1810;
+    return Math.floor(mult * lv);
+}
+
+function updateExpBar(level, exp, expToNext) {
+    const maxExp = (expToNext !== undefined && expToNext !== null) ? Number(expToNext) : getExpToNextByLevel(level);
+    const safeMax = Math.max(1, Number(maxExp) || 1);
+    const safeExp = Math.max(0, Number(exp) || 0);
     document.getElementById('level-display').innerText = level;
-    document.getElementById('exp-text').innerText = `${exp} / ${maxExp}`;
-    document.getElementById('exp-bar').style.width = (exp / maxExp * 100) + '%';
+    document.getElementById('exp-text').innerText = `${safeExp} / ${safeMax}`;
+    document.getElementById('exp-bar').style.width = (safeExp / safeMax * 100) + '%';
 }
 
 function addLog(message, isSystem = false) {
@@ -135,6 +157,16 @@ function formatAiBadge(meta) {
     if (provider === 'ollama') return `[Ollama${model} ✨]`;
     if (provider === 'gemini') return `[Gemini${model} ✨]`;
     return `[AI${model} ✨]`;
+}
+
+function formatEventTypeLabel(eventType) {
+    const t = String(eventType || '').toLowerCase();
+    if (t === 'encounter') return "<span style='color:#ff8a80;'>전투</span>";
+    if (t === 'gold') return "<span style='color:#ffd54f;'>골드</span>";
+    if (t === 'chest') return "<span style='color:#ffcc80;'>보물</span>";
+    if (t === 'trap') return "<span style='color:#ef9a9a;'>함정</span>";
+    if (t === 'mana_spring') return "<span style='color:#80deea;'>마나</span>";
+    return "<span style='color:#cfd8dc;'>이벤트</span>";
 }
 
 function setBattleStage(stage, mobName = '', mobMaxHp = 0) {
@@ -380,6 +412,8 @@ async function sendAction(actionType) {
             addLog('🔥 모닥불을 피울 안전한 곳을 찾습니다... (AI 묘사 대기 중)', true);
         } else if (actionType === 'summon') {
             addLog('✨ 차원의 틈새를 엽니다...', true);
+        } else if (actionType === 'next_floor') {
+            addLog('⬆️ 계단을 올라 다음 층으로 이동합니다...', true);
         }
 
         const data = await callApi(actionType, {method: 'POST'});
@@ -402,7 +436,8 @@ async function sendAction(actionType) {
                         if (lastLog && lastLog.innerText.includes('AI 묘사 대기 중')) logBox.removeChild(lastLog);
 
                         if (data.event_title && data.event_type) {
-                            addLog(`🧭 <b>[${data.event_title}]</b> (${data.event_type})`, true);
+                            const typeLabel = formatEventTypeLabel(data.event_type);
+                            addLog(`🧭 <b style='color:#b39ddb;'>[${data.event_title}]</b> (${typeLabel})`, true);
                         }
 
                         const streamLog = document.createElement('div');
@@ -441,7 +476,7 @@ async function sendAction(actionType) {
                 } else if (data.status === 'error') {
                     addLog(data.msg, true);
                 }
-            } else if (actionType === 'rest' || actionType === 'summon') {
+                } else if (actionType === 'rest' || actionType === 'summon') {
                  if(data.status === 'success') {
                     if (data.logs) data.logs.forEach(l => addLog(l));
                     else if(data.log) addLog(data.log); // 휴식 로그 출력
@@ -455,6 +490,18 @@ async function sendAction(actionType) {
                 } else {
                     addLog(data.msg, true);
                  }
+            } else if (actionType === 'next_floor') {
+                if (data.status === 'success') {
+                    if (data.new_floor !== undefined) {
+                        document.getElementById('floor-display').innerText = data.new_floor;
+                    }
+                    if (data.new_hp !== undefined && data.max_hp !== undefined && data.new_mp !== undefined && data.max_mp !== undefined) {
+                        updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
+                    }
+                    if (data.msg) addLog(data.msg, true);
+                } else {
+                    addLog(data.msg, true);
+                }
             }
         }
     } catch (e) {
@@ -566,6 +613,22 @@ function showObtainEffect(rank, name) {
     setTimeout(() => { overlay.style.display = 'none'; }, 4000);
 }
 
+function showLevelUpEffect(fromLevel, toLevel, levelupCount = 1) {
+    const overlay = document.getElementById('levelup-overlay');
+    const levelText = document.getElementById('levelup-level-text');
+    const metaText = document.getElementById('levelup-meta-text');
+    if (!overlay || !levelText || !metaText) return;
+
+    levelText.innerText = `Lv.${fromLevel} -> Lv.${toLevel}`;
+    if (levelupCount >= 2) {
+        metaText.innerText = `연속 레벨업 ${levelupCount}회! 잠재력이 폭발합니다.`;
+    } else {
+        metaText.innerText = '새로운 힘이 각성합니다.';
+    }
+    overlay.style.display = 'flex';
+    setTimeout(() => { overlay.style.display = 'none'; }, 2600);
+}
+
 async function openModal(modalId, listAreaId, action) {
     document.getElementById(modalId).style.display = 'flex';
     document.getElementById(listAreaId).innerHTML = '불러오는 중...';
@@ -653,7 +716,29 @@ async function startAutoExplore() {
 async function claimAutoExplore() {
     const data = await callApi('auto_explore_claim', { method: 'POST' });
     if (data && data.status === 'success') {
+        const prevLevel = Number(document.getElementById('level-display').innerText || 1);
         addLog(data.log, true);
+        if (Array.isArray(data.levelup_logs)) {
+            for (const lvlog of data.levelup_logs) addLog(lvlog, true);
+        }
+        if (data.new_level !== undefined && data.new_exp !== undefined) {
+            updateExpBar(data.new_level, data.new_exp, data.exp_to_next);
+            const gainCount = Number(data.levelup_count || (Array.isArray(data.levelup_logs) ? data.levelup_logs.length : 0));
+            if (Number(data.new_level) > prevLevel) {
+                showLevelUpEffect(prevLevel, Number(data.new_level), gainCount || 1);
+            }
+        }
+        if (data.new_stat_points !== undefined) {
+            updateStatUI(data.new_stat_points);
+        }
+        if (data.new_hp !== undefined && data.new_max_hp !== undefined && data.new_mp !== undefined && data.new_max_mp !== undefined) {
+            updatePlayerBars(data.new_hp, data.new_max_hp, data.new_mp, data.new_max_mp);
+        }
+        if (data.rewards && data.rewards.gold !== undefined) {
+            const goldEl = document.getElementById('gold-display');
+            const currentGold = Number((goldEl && goldEl.innerText || '0').replace(/,/g, '')) || 0;
+            goldEl.innerText = (currentGold + Number(data.rewards.gold)).toLocaleString();
+        }
         updateAutoExploreUI(false);
         toggleEquip(0,-1); 
     } else if(data) {

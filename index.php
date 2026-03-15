@@ -13,6 +13,28 @@ try {
     $commander = $stmt->fetch();
     if (!$commander) { session_destroy(); header("Location: login.php"); exit; }
 } catch (\PDOException $e) { die("DB 오류"); }
+
+function get_exp_to_next_for_level($level) {
+    $lv = max(1, (int)$level);
+    if ($lv >= 1000) return 0;
+    if ($lv <= 10) return 100 * $lv;
+    if ($lv <= 20) return 140 * $lv;
+    if ($lv <= 30) return 190 * $lv;
+    if ($lv <= 40) return 250 * $lv;
+    if ($lv <= 50) return 320 * $lv;
+    if ($lv <= 100) return 420 * $lv;
+    if ($lv <= 200) return 520 * $lv;
+    if ($lv <= 300) return 680 * $lv;
+    if ($lv <= 400) return 860 * $lv;
+    if ($lv <= 500) return 1060 * $lv;
+    if ($lv <= 650) return 1280 * $lv;
+    if ($lv <= 800) return 1530 * $lv;
+    if ($lv <= 900) return 1810 * $lv;
+    return 2120 * $lv;
+}
+
+$exp_to_next = get_exp_to_next_for_level((int)($commander['level'] ?? 1));
+$exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $exp_to_next) * 100) : 100;
 ?>
 
 <!DOCTYPE html>
@@ -68,6 +90,13 @@ try {
         .obtain-text { font-size: 3rem; font-weight: bold; color: #fff; text-shadow: 0 0 20px #ffeb3b; z-index:2001; text-align:center; animation: scaleUp 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         .obtain-rank { font-size: 1.5rem; color: #ff5252; margin-bottom: 20px; z-index:2001; letter-spacing: 5px; animation: slideDown 0.5s; }
         .obtain-sub { font-size: 1rem; color: #aaa; margin-top: 30px; z-index:2001; opacity:0; animation: fadeIn 1s 1s forwards; }
+
+        /* 레벨업 오버레이 */
+        #levelup-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:2100; background:rgba(8, 12, 24, 0.88); justify-content:center; align-items:center; }
+        .levelup-card { min-width:320px; max-width:90%; text-align:center; padding:28px 24px; border-radius:12px; border:2px solid #ffd54f; background:linear-gradient(180deg, #1b2432 0%, #0f1624 100%); box-shadow:0 0 28px rgba(255, 213, 79, 0.35); animation: scaleUp 0.45s ease-out; }
+        .levelup-title { font-size:2.1rem; font-weight:bold; color:#ffeb3b; letter-spacing:2px; text-shadow:0 0 16px rgba(255, 235, 59, 0.7); }
+        .levelup-level { margin-top:10px; font-size:1.4rem; color:#ffffff; font-weight:bold; }
+        .levelup-meta { margin-top:10px; font-size:0.95rem; color:#b0bec5; }
         
         @keyframes scaleUp { 
             0% { transform: scale(0.1); opacity: 0; } 
@@ -100,8 +129,8 @@ try {
         <div class="bar-bg"><div class="mp-bar" id="player-mp-bar" style="width: <?= ($commander['mp'] / $commander['max_mp']) * 100 ?>%;"></div></div>
         
         <!-- 경험치 바 추가 -->
-        <div style="font-size: 0.85rem; color: #b388ff; margin-bottom: 3px; font-weight: bold;">EXP (<span id="exp-text"><?= $commander['exp'] ?? 0 ?> / <?= ($commander['level'] ?? 1) * 100 ?></span>)</div>
-        <div class="bar-bg"><div class="exp-bar" id="exp-bar" style="background: #7c4dff; height: 100%; width: <?= (($commander['exp'] ?? 0) / max(1, ($commander['level'] ?? 1) * 100)) * 100 ?>%; transition: width 0.3s;"></div></div>
+        <div style="font-size: 0.85rem; color: #b388ff; margin-bottom: 3px; font-weight: bold;">EXP (<span id="exp-text"><?= $commander['exp'] ?? 0 ?> / <?= max(1, $exp_to_next) ?></span>)</div>
+        <div class="bar-bg"><div class="exp-bar" id="exp-bar" style="background: #7c4dff; height: 100%; width: <?= $exp_progress_width ?>%; transition: width 0.3s;"></div></div>
 
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:8px; background:#1a1a1a; border-radius:4px; border:1px solid #333;">
             <span style="color:#aaa; font-size:0.9rem;">🚩 최고 도달</span>
@@ -168,6 +197,7 @@ try {
 
         <div id="explore-actions" class="action-container">
             <div class="btn" onclick="sendAction('action')">탐색하기 👣</div>
+            <div class="btn" style="background:#1976d2;" onclick="sendAction('next_floor')">다음 층 이동 ⬆️</div>
             <div class="btn" onclick="sendAction('rest')">휴식하기 🏕️</div>
             <div class="btn btn-summon" onclick="sendAction('summon')">영웅 소환 ✨</div>
             <div class="btn" style="background:#673ab7;" onclick="openCombineModal()">조합/진화 🔮</div>
@@ -278,6 +308,14 @@ try {
         <div class="obtain-rank" id="eff-rank">MYTHIC</div>
         <div class="obtain-text" id="eff-name">영웅 이름</div>
         <div class="obtain-sub">화면을 클릭하여 닫기</div>
+    </div>
+
+    <div id="levelup-overlay" onclick="this.style.display='none'">
+        <div class="levelup-card">
+            <div class="levelup-title">LEVEL UP!</div>
+            <div class="levelup-level" id="levelup-level-text">Lv.1 → Lv.2</div>
+            <div class="levelup-meta" id="levelup-meta-text">성장이 깨어납니다.</div>
+        </div>
     </div>
 
     <div class="panel right-panel">

@@ -263,6 +263,79 @@ function get_total_hero_units(PDO $pdo, $uid) {
 	return (int)$st->fetchColumn();
 }
 
+function get_commander_level_band($level) {
+	$lv = max(1, (int)$level);
+	if ($lv <= 10) return array('exp_mult' => 100, 'sp' => 3, 'hp' => 12, 'mp' => 6);
+	if ($lv <= 20) return array('exp_mult' => 140, 'sp' => 3, 'hp' => 14, 'mp' => 7);
+	if ($lv <= 30) return array('exp_mult' => 190, 'sp' => 4, 'hp' => 16, 'mp' => 8);
+	if ($lv <= 40) return array('exp_mult' => 250, 'sp' => 4, 'hp' => 18, 'mp' => 10);
+	if ($lv <= 50) return array('exp_mult' => 320, 'sp' => 5, 'hp' => 20, 'mp' => 12);
+	if ($lv <= 100) return array('exp_mult' => 420, 'sp' => 5, 'hp' => 22, 'mp' => 13);
+	if ($lv <= 200) return array('exp_mult' => 520, 'sp' => 6, 'hp' => 24, 'mp' => 14);
+	if ($lv <= 300) return array('exp_mult' => 680, 'sp' => 6, 'hp' => 26, 'mp' => 15);
+	if ($lv <= 400) return array('exp_mult' => 860, 'sp' => 7, 'hp' => 28, 'mp' => 16);
+	if ($lv <= 500) return array('exp_mult' => 1060, 'sp' => 7, 'hp' => 30, 'mp' => 18);
+	if ($lv <= 650) return array('exp_mult' => 1280, 'sp' => 8, 'hp' => 32, 'mp' => 19);
+	if ($lv <= 800) return array('exp_mult' => 1530, 'sp' => 8, 'hp' => 34, 'mp' => 21);
+	if ($lv <= 900) return array('exp_mult' => 1810, 'sp' => 9, 'hp' => 36, 'mp' => 22);
+	return array('exp_mult' => 2120, 'sp' => 10, 'hp' => 40, 'mp' => 24);
+}
+
+function get_required_exp_for_next_level($level) {
+	$lv = max(1, (int)$level);
+	if ($lv >= 1000) return 0;
+	$band = get_commander_level_band($lv);
+	return (int)$band['exp_mult'] * $lv;
+}
+
+function apply_commander_exp_gain(PDO $pdo, $uid, $cmd, $exp_gain) {
+	$level = max(1, (int)$cmd['level']);
+	$exp = max(0, (int)$cmd['exp']) + max(0, (int)$exp_gain);
+	$stat_points = max(0, (int)$cmd['stat_points']);
+	$max_hp = max(1, (int)$cmd['max_hp']);
+	$hp = max(0, (int)$cmd['hp']);
+	$max_mp = max(1, (int)$cmd['max_mp']);
+	$mp = max(0, (int)$cmd['mp']);
+	$levelup_logs = array();
+
+	while ($level < 1000) {
+		$need = get_required_exp_for_next_level($level);
+		if ($need <= 0 || $exp < $need) break;
+		$exp -= $need;
+		$level++;
+		$band = get_commander_level_band($level);
+		$stat_points += (int)$band['sp'];
+		$max_hp += (int)$band['hp'];
+		$hp += (int)$band['hp'];
+		$max_mp += (int)$band['mp'];
+		$mp += (int)$band['mp'];
+		$levelup_logs[] = "🌟 레벨업! Lv.{$level} 달성 (SP +{$band['sp']}, HP +{$band['hp']}, MP +{$band['mp']})";
+	}
+
+	if ($level >= 1000) {
+		$level = 1000;
+		$exp = 0;
+	}
+
+	$hp = min($max_hp, $hp);
+	$mp = min($max_mp, $mp);
+
+	$pdo->prepare("UPDATE tb_commanders SET level = ?, exp = ?, stat_points = ?, max_hp = ?, hp = ?, max_mp = ?, mp = ? WHERE uid = ?")
+		->execute(array($level, $exp, $stat_points, $max_hp, $hp, $max_mp, $mp, $uid));
+
+	return array(
+		'level' => $level,
+		'exp' => $exp,
+		'stat_points' => $stat_points,
+		'max_hp' => $max_hp,
+		'hp' => $hp,
+		'max_mp' => $max_mp,
+		'mp' => $mp,
+		'exp_to_next' => get_required_exp_for_next_level($level),
+		'levelup_logs' => $levelup_logs
+	);
+}
+
 function generate_hero_lists($heroes) {
 	$deck_html = '';
 	$inv_html = '';
@@ -434,6 +507,12 @@ function apply_hero_skills(&$hero, &$new_mob_hp, &$logs, &$total_gold_gain, &$cm
 	}
 }
 
+function sanitize_event_title($title) {
+	$t = trim((string)$title);
+	$t = preg_replace('/\s*#\d+\s*$/u', '', $t);
+	return trim($t);
+}
+
 function handle_action(PDO $pdo) {
 	app_log('handle_action.start');
 	$uid = get_uid_or_fail();
@@ -482,7 +561,7 @@ function handle_action(PDO $pdo) {
 		}
 
 		$event_type = isset($selected_event['event_type']) ? (string)$selected_event['event_type'] : 'encounter';
-		$event_title = isset($selected_event['event_title']) ? (string)$selected_event['event_title'] : '알 수 없는 사건';
+		$event_title = isset($selected_event['event_title']) ? sanitize_event_title($selected_event['event_title']) : '알 수 없는 사건';
 		$event_seed = isset($selected_event['ai_seed']) ? (string)$selected_event['ai_seed'] : '';
 
 		$resp = array('status' => 'safe');
@@ -492,10 +571,6 @@ function handle_action(PDO $pdo) {
 
 		if ($event_type === 'encounter') {
 			// 전투 조우
-			if (rand(1, 100) <= 12) {
-				$new_floor += 1;
-				$max_floor = max($max_floor, $new_floor);
-			}
 			$diff = pow(2, floor(($new_floor - 1) / 10));
 			$is_boss = ($new_floor % 10 === 0);
 			if ($is_boss) {
@@ -565,10 +640,8 @@ function handle_action(PDO $pdo) {
 					}
 				}
 			} else {
-				$new_floor += 1;
-				$max_floor = max($max_floor, $new_floor);
 				$hp = min($max_hp, $hp + 6);
-				$log = "👣 <b>[{$event_title}]</b> {$event_seed} 지하 {$new_floor}층 진입.";
+				$log = "👣 <b>[{$event_title}]</b> {$event_seed} 전열을 정비했습니다.";
 			}
 
 			$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, hp = ?, mp = ? WHERE uid = ?")
@@ -590,6 +663,45 @@ function handle_action(PDO $pdo) {
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
 		json_error('탐색 중 오류가 발생했습니다.');
+	}
+}
+
+function handle_next_floor(PDO $pdo) {
+	app_log('handle_next_floor.start');
+	$uid = get_uid_or_fail();
+	try {
+		$pdo->beginTransaction();
+		$st = $pdo->prepare("SELECT current_floor, max_floor, hp, max_hp, mp, max_mp, is_combat FROM tb_commanders WHERE uid = ? FOR UPDATE");
+		$st->execute(array($uid));
+		$cmd = $st->fetch();
+		if (!$cmd) throw new Exception('유저 정보 없음');
+		if ((int)$cmd['hp'] <= 0) throw new Exception('사망 상태에서는 이동할 수 없습니다.');
+		if ((int)$cmd['is_combat'] === 1) throw new Exception('전투 중에는 이동할 수 없습니다.');
+
+		$new_floor = (int)$cmd['current_floor'] + 1;
+		$new_max_floor = max((int)$cmd['max_floor'], $new_floor);
+		$mp_regen = max(0, (int)floor(((int)$cmd['max_mp']) * 0.02));
+		$new_mp = min((int)$cmd['max_mp'], (int)$cmd['mp'] + $mp_regen);
+
+		$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, mp = ? WHERE uid = ?")
+			->execute(array($new_floor, $new_max_floor, $new_mp, $uid));
+
+		$log = "⬆️ 다음 층으로 이동했습니다. <b>{$new_floor}층</b>";
+		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
+		$pdo->commit();
+
+		echo json_encode(array(
+			'status' => 'success',
+			'msg' => $log,
+			'new_floor' => $new_floor,
+			'new_hp' => (int)$cmd['hp'],
+			'max_hp' => (int)$cmd['max_hp'],
+			'new_mp' => $new_mp,
+			'max_mp' => (int)$cmd['max_mp']
+		));
+	} catch (Exception $e) {
+		if ($pdo->inTransaction()) $pdo->rollBack();
+		json_error($e->getMessage());
 	}
 }
 
@@ -1343,12 +1455,32 @@ function handle_auto_explore_claim(PDO $pdo) {
 		$bonus = max(1, floor((int)$cmd['current_floor'] / 10));
 		$gold = $minutes * 10 * $bonus;
 		$exp = $minutes * 5 * $bonus;
-		$pdo->prepare("UPDATE tb_commanders SET gold = gold + ?, exp = exp + ?, auto_explore_start_time = NULL WHERE uid = ?")->execute(array($gold, $exp, $uid));
+		$pdo->prepare("UPDATE tb_commanders SET gold = gold + ?, auto_explore_start_time = NULL WHERE uid = ?")->execute(array($gold, $uid));
+		$prog = apply_commander_exp_gain($pdo, $uid, $cmd, $exp);
 		$log = "🏕️ <b>[자동 탐험 종료]</b> {$minutes}분 탐험. <span style='color:#ffd700;'>{$gold}G</span>, <span style='color:#b388ff;'>{$exp}XP</span> 획득!";
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
+		if (!empty($prog['levelup_logs'])) {
+			foreach ($prog['levelup_logs'] as $lvlog) {
+				$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $lvlog));
+			}
+		}
 		$pdo->commit();
 
-		echo json_encode(array('status' => 'success', 'log' => $log, 'rewards' => array('gold' => $gold, 'exp' => $exp)));
+		echo json_encode(array(
+			'status' => 'success',
+			'log' => $log,
+			'rewards' => array('gold' => $gold, 'exp' => $exp),
+			'levelup_count' => count($prog['levelup_logs']),
+			'new_level' => (int)$prog['level'],
+			'new_exp' => (int)$prog['exp'],
+			'exp_to_next' => (int)$prog['exp_to_next'],
+			'new_stat_points' => (int)$prog['stat_points'],
+			'new_hp' => (int)$prog['hp'],
+			'new_max_hp' => (int)$prog['max_hp'],
+			'new_mp' => (int)$prog['mp'],
+			'new_max_mp' => (int)$prog['max_mp'],
+			'levelup_logs' => $prog['levelup_logs']
+		));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
 		json_error($e->getMessage());
@@ -1977,6 +2109,7 @@ switch ($action) {
 	case 'auto_explore_start': handle_auto_explore_start($pdo); break;
 	case 'auto_explore_status': handle_auto_explore_status($pdo); break;
 	case 'auto_explore_claim': handle_auto_explore_claim($pdo); break;
+	case 'next_floor': handle_next_floor($pdo); break;
 	case 'expedition_info': handle_expedition_info($pdo); break;
 	case 'start_expedition': handle_start_expedition($pdo); break;
 	case 'claim_expedition': handle_claim_expedition($pdo); break;
