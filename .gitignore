@@ -1,0 +1,9 @@
+# Sensitive configuration
+.env
+
+# Log files
+/logs/
+*.log
+
+# Vendor directory for dependencies
+/vendor/
