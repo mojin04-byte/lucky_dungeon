@@ -99,6 +99,28 @@ function updateExpBar(level, exp, expToNext) {
     document.getElementById('exp-bar').style.width = (safeExp / safeMax * 100) + '%';
 }
 
+function applyRewardUi(data) {
+    if (!data) return;
+
+    const prevLevel = Number(document.getElementById('level-display').innerText || 1);
+
+    if (data.new_gold !== undefined) {
+        document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+    }
+
+    if (data.new_level !== undefined && data.new_exp !== undefined) {
+        updateExpBar(data.new_level, data.new_exp, data.exp_to_next);
+        const levelupCount = Number(data.levelup_count || (Array.isArray(data.levelup_logs) ? data.levelup_logs.length : 0));
+        if (Number(data.new_level) > prevLevel) {
+            showLevelUpEffect(prevLevel, Number(data.new_level), levelupCount || 1);
+        }
+    }
+
+    if (data.stat_points !== undefined) {
+        updateStatUI(data.stat_points);
+    }
+}
+
 function addLog(message, isSystem = false) {
     const logBox = document.getElementById('game-log');
     const newLog = document.createElement('div');
@@ -332,8 +354,7 @@ async function doCombatTurn() {
             window.currentMobMaxHp = Number(data.mob_max_hp || window.currentMobMaxHp || 1);
             document.getElementById('mob-hp-text').innerText = `${data.mob_hp}/${data.mob_max_hp}`;
             document.getElementById('mob-hp-bar').style.width = (data.mob_hp / data.mob_max_hp * 100) + '%';
-            if (data.new_level) updateExpBar(data.new_level, data.new_exp);
-            if (data.stat_points !== undefined) updateStatUI(data.stat_points);
+            applyRewardUi(data);
 
                 if (data.stream) {
                     const logBox = document.getElementById('game-log');
@@ -428,6 +449,10 @@ async function sendAction(actionType) {
                     }
                     if (data.status === 'safe') {
                         updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
+                        applyRewardUi(data);
+                        if (Array.isArray(data.levelup_logs)) {
+                            for (const line of data.levelup_logs) addLog(line, true);
+                        }
                     }
                     if (data.stream) {
                         isStreamInProgress = true;
@@ -543,6 +568,7 @@ async function useSkill(skillId) {
                 }
             }
             updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
+            applyRewardUi(data);
             if (data.mob_hp !== undefined) {
                 window.currentMobHp = Number(data.mob_hp || 0);
                 document.getElementById('mob-hp-text').innerText = `${data.mob_hp}/${window.currentMobMaxHp}`;
@@ -818,4 +844,8 @@ window.addEventListener('DOMContentLoaded', () => {
     
     checkAutoExploreStatus();
     autoExploreTimer = setInterval(checkAutoExploreStatus, 5000);
+
+    if (window.initialIntroStory) {
+        setTimeout(() => showStoryModal(window.initialIntroStory), 500);
+    }
 });

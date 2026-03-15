@@ -14,6 +14,32 @@ try {
     if (!$commander) { session_destroy(); header("Location: login.php"); exit; }
 } catch (\PDOException $e) { die("DB 오류"); }
 
+$intro_story_payload = null;
+$background_story = trim((string)($commander['background_story'] ?? ''));
+$intro_story_seen = (int)($commander['intro_story_seen'] ?? 0);
+if ($background_story !== '' && $intro_story_seen === 0) {
+    $tone_map = [
+        'dark_fantasy' => '다크 판타지',
+        'high_tension' => '하이텐션',
+        'concise_log' => '간결 로그'
+    ];
+    $tone_key = (string)($commander['narrative_tone'] ?? 'dark_fantasy');
+    $tone_label = $tone_map[$tone_key] ?? '다크 판타지';
+
+    $_SESSION['story_stream_text'] = trim(
+        "다음 배경 설정을 바탕으로, 게임 시작 직후 메인 팝업에서 보여줄 오프닝 서사를 작성하라. " .
+        "반드시 한국어로 작성하고, 5~8문장 분량의 스크립트형 연출로 구성하라. " .
+        "주인공 이름은 '{$commander['nickname']}', 직업은 '{$commander['class_type']}', 톤은 '{$tone_label}'이다. " .
+        "플레이어가 곧 1층 탐험을 시작한다는 긴장감을 담고, 마지막 문장은 한 걸음을 내딛는 장면으로 마무리하라. " .
+        "배경 서사: {$background_story}"
+    );
+
+    $pdo->prepare("UPDATE tb_commanders SET intro_story_seen = 1 WHERE uid = ?")->execute([$uid]);
+    $intro_story_payload = [
+        'story_title' => '운명의 서막'
+    ];
+}
+
 function get_exp_to_next_for_level($level) {
     $lv = max(1, (int)$level);
     if ($lv >= 1000) return 0;
@@ -342,6 +368,7 @@ $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $ex
         window.currentMobMaxHp = <?= (int)$commander['mob_max_hp'] ?>;
         // 초기 스탯 포인트 버튼 갱신을 위해 DOM 로드 후 실행될 JS에 값 전달
         window.initialStatPoints = <?= (int)($commander['stat_points'] ?? 0) ?>;
+        window.initialIntroStory = <?= json_encode($intro_story_payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     </script>
     <script src="game.js?v=<?= time() ?>"></script>
     <script>

@@ -60,6 +60,34 @@ try {
     die("<h1>던전 입구(DB)가 무너졌습니다: " . $e->getMessage() . "</h1>");
 }
 
+try {
+    if (table_exists($pdo, 'tb_explore_events')) {
+        $expEventCount = (int)$pdo->query("SELECT COUNT(*) FROM tb_explore_events WHERE event_type = 'exp'")->fetchColumn();
+        if ($expEventCount === 0) {
+            $pdo->beginTransaction();
+            $expSeeds = array(
+                'Ancient fragments sharpen your battle senses.',
+                'A dead tactician leaves behind a surviving lesson.',
+                'Broken manuals whisper a path to survive.',
+                'A bloodstained altar grants grim insight.',
+                'Forgotten memories awaken in the dark.'
+            );
+            $insertExp = $pdo->prepare("INSERT INTO tb_explore_events (event_code, event_type, event_title, ai_seed, weight, min_floor, max_floor, is_enabled) VALUES (?, 'exp', ?, ?, ?, ?, ?, 1)");
+            for ($i = 1; $i <= 16; $i++) {
+                $title = 'Memory Fragment #' . str_pad((string)$i, 3, '0', STR_PAD_LEFT);
+                $seed = $expSeeds[$i % count($expSeeds)];
+                $insertExp->execute(array('EXP_' . str_pad((string)$i, 3, '0', STR_PAD_LEFT), $title, $seed, 8, 1, 9999));
+            }
+            $pdo->commit();
+        }
+    }
+} catch (\PDOException $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    error_log("EXP event migration failed: " . $e->getMessage());
+}
+
 // ==========================================
 // 마이그레이션 작업: 자동 탐험 및 토벌대 컬럼 추가
 // ==========================================
@@ -91,6 +119,9 @@ try {
     }
     if (!column_exists($pdo, 'tb_commanders', 'auto_explore_rewards')) {
         $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `auto_explore_rewards` TEXT NULL COMMENT '자동 탐험 보상'");
+    }
+    if (!column_exists($pdo, 'tb_commanders', 'intro_story_seen')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `intro_story_seen` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '시작 서사 연출 확인 여부'");
     }
 
     // 토벌대 메인 테이블

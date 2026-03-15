@@ -336,6 +336,63 @@ function apply_commander_exp_gain(PDO $pdo, $uid, $cmd, $exp_gain) {
 	);
 }
 
+function get_battle_reward_bundle($floor, $mob_name = '') {
+	$safe_floor = max(1, (int)$floor);
+	$is_boss = (strpos((string)$mob_name, '[보스]') !== false);
+	$gold_min = $is_boss ? 90 : 28;
+	$gold_max = $is_boss ? 180 : 52;
+	$exp_min = $is_boss ? 140 : 34;
+	$exp_max = $is_boss ? 260 : 68;
+
+	return array(
+		'gold' => rand($gold_min, $gold_max) * max(1, (int)floor($safe_floor / 2)),
+		'exp' => rand($exp_min, $exp_max) * $safe_floor,
+		'is_boss' => $is_boss
+	);
+}
+
+function apply_commander_rewards(PDO $pdo, $uid, $cmd_state, $gold_gain, $exp_gain) {
+	$gold_gain = max(0, (int)$gold_gain);
+	$exp_gain = max(0, (int)$exp_gain);
+	$base_gold = isset($cmd_state['gold']) ? (int)$cmd_state['gold'] : 0;
+
+	if ($gold_gain > 0) {
+		$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($gold_gain, $uid));
+	}
+
+	if ($exp_gain > 0) {
+		$progress = apply_commander_exp_gain($pdo, $uid, $cmd_state, $exp_gain);
+	} else {
+		$progress = array(
+			'level' => isset($cmd_state['level']) ? (int)$cmd_state['level'] : 1,
+			'exp' => isset($cmd_state['exp']) ? (int)$cmd_state['exp'] : 0,
+			'stat_points' => isset($cmd_state['stat_points']) ? (int)$cmd_state['stat_points'] : 0,
+			'max_hp' => isset($cmd_state['max_hp']) ? (int)$cmd_state['max_hp'] : 1,
+			'hp' => isset($cmd_state['hp']) ? (int)$cmd_state['hp'] : 1,
+			'max_mp' => isset($cmd_state['max_mp']) ? (int)$cmd_state['max_mp'] : 1,
+			'mp' => isset($cmd_state['mp']) ? (int)$cmd_state['mp'] : 0,
+			'exp_to_next' => get_required_exp_for_next_level(isset($cmd_state['level']) ? (int)$cmd_state['level'] : 1),
+			'levelup_logs' => array()
+		);
+	}
+
+	return array(
+		'new_gold' => $base_gold + $gold_gain,
+		'reward_gold' => $gold_gain,
+		'reward_exp' => $exp_gain,
+		'new_level' => (int)$progress['level'],
+		'new_exp' => (int)$progress['exp'],
+		'exp_to_next' => (int)$progress['exp_to_next'],
+		'stat_points' => (int)$progress['stat_points'],
+		'new_hp' => (int)$progress['hp'],
+		'max_hp' => (int)$progress['max_hp'],
+		'new_mp' => (int)$progress['mp'],
+		'max_mp' => (int)$progress['max_mp'],
+		'levelup_logs' => $progress['levelup_logs'],
+		'levelup_count' => count($progress['levelup_logs'])
+	);
+}
+
 function generate_hero_lists($heroes) {
 	$deck_html = '';
 	$inv_html = '';
@@ -607,19 +664,22 @@ function handle_action(PDO $pdo) {
 			$max_hp = (int)$cmd['max_hp'];
 			$mp = $new_mp_common;
 			$max_mp = (int)$cmd['max_mp'];
+			$reward_gold = 0;
+			$reward_exp = 0;
 
 			if ($event_type === 'gold') {
 				$base_gold = rand(30, 140) * max(1, floor($current_floor / 2));
-				$gold = (int)floor($base_gold * (1 + ($p_luk * 0.01)));
-				$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($gold, $uid));
-				$log = "💰 <b>[{$event_title}]</b> {$event_seed} <b>{$gold}G</b> 획득.";
+				$reward_gold = (int)floor($base_gold * (1 + ($p_luk * 0.01)));
+				$log = "💰 <b>[{$event_title}]</b> {$event_seed} <b>{$reward_gold}G</b> 획득.";
 			} elseif ($event_type === 'chest') {
 				$base_gold = rand(80, 260) * max(1, floor($current_floor / 2));
-				$gold = (int)floor($base_gold * (1 + ($p_luk * 0.01)));
+				$reward_gold = (int)floor($base_gold * (1 + ($p_luk * 0.01)));
 				$heal = rand(4, 12);
 				$hp = min($max_hp, $hp + $heal);
-				$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($gold, $uid));
-				$log = "🎁 <b>[{$event_title}]</b> {$event_seed} <b>{$gold}G</b> + HP <b>{$heal}</b>.";
+				$log = "🎁 <b>[{$event_title}]</b> {$event_seed} <b>{$reward_gold}G</b> + HP <b>{$heal}</b>.";
+			} elseif ($event_type === 'exp') {
+				$reward_exp = rand(20, 45) * max(1, $current_floor);
+				$log = "📘 <b>[{$event_title}]</b> {$event_seed} 경험치 <b>+{$reward_exp}</b>.";
 			} elseif ($event_type === 'mana_spring') {
 				$mana_gain = rand(12, 28) + (int)floor($p_mag / 6);
 				$mp = min($max_mp, $mp + $mana_gain);
@@ -631,9 +691,8 @@ function handle_action(PDO $pdo) {
 				} else {
 					$dmg = max(1, rand(5, 15) - (int)floor($p_vit / 2));
 					if (rand(1, 100) <= min(40, (int)floor($p_luk / 2))) {
-						$lucky = (int)floor(rand(5, 25) * (1 + ($p_luk * 0.01)));
-						$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($lucky, $uid));
-						$log = "🍀 <b>[{$event_title}]</b> 함정을 회피하고 <b>{$lucky}G</b> 획득.";
+						$reward_gold = (int)floor(rand(5, 25) * (1 + ($p_luk * 0.01)));
+						$log = "🍀 <b>[{$event_title}]</b> 함정을 회피하고 <b>{$reward_gold}G</b> 획득.";
 					} else {
 						$hp = max(1, $hp - $dmg);
 						$log = "🩸 <b>[{$event_title}]</b> {$event_seed} HP <b>-{$dmg}</b>.";
@@ -652,6 +711,16 @@ function handle_action(PDO $pdo) {
 			$resp['new_mp'] = $mp;
 			$resp['max_mp'] = $max_mp;
 			$resp['new_floor'] = $new_floor;
+
+			if ($reward_gold > 0 || $reward_exp > 0) {
+				$reward_state = $cmd;
+				$reward_state['hp'] = $hp;
+				$reward_state['max_hp'] = $max_hp;
+				$reward_state['mp'] = $mp;
+				$reward_state['max_mp'] = $max_mp;
+				$reward_meta = apply_commander_rewards($pdo, $uid, $reward_state, $reward_gold, $reward_exp);
+				$resp = array_merge($resp, $reward_meta);
+			}
 		}
 
 		$resp['log'] = $log;
@@ -814,15 +883,23 @@ function handle_combat(PDO $pdo) {
 			}
 		}
 
-		if ($total_gold_gain > 0) {
+		if ($total_gold_gain > 0 && $new_mob_hp > 0) {
 			$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($total_gold_gain, $uid));
 		}
 		foreach ($hero_damage_map as $hero_name => $hero_damage) {
 			$turn_damage_details[] = array('name' => (string)$hero_name, 'damage' => (int)$hero_damage);
 		}
 
+		$reward_meta = null;
 		if ($new_mob_hp <= 0) {
 			$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 쓰러졌습니다!";
+			$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
+			$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => (int)$cmd['mp'])), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp']);
+			$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
+			foreach ($reward_meta['levelup_logs'] as $levelup_log) {
+				$logs[] = $levelup_log;
+			}
+			$new_hp = (int)$reward_meta['new_hp'];
 			unset($_SESSION['combat_state']);
 			$status = 'victory';
 		} else {
@@ -878,11 +955,20 @@ function handle_combat(PDO $pdo) {
 			'max_hit_hero_name' => (string)$max_hit_hero_name,
 			'max_hit_hero_dmg' => (int)$max_hit_hero_dmg,
 			'new_hp' => $new_hp,
-			'max_hp' => (int)$cmd['max_hp'],
-			'new_mp' => (int)$cmd['mp'],
-			'max_mp' => (int)$cmd['max_mp'],
+			'max_hp' => $reward_meta ? (int)$reward_meta['max_hp'] : (int)$cmd['max_hp'],
+			'new_mp' => $reward_meta ? (int)$reward_meta['new_mp'] : (int)$cmd['mp'],
+			'max_mp' => $reward_meta ? (int)$reward_meta['max_mp'] : (int)$cmd['max_mp'],
 			'mob_hp' => $new_mob_hp,
-			'mob_max_hp' => (int)$cmd['mob_max_hp']
+			'mob_max_hp' => (int)$cmd['mob_max_hp'],
+			'new_gold' => $reward_meta ? (int)$reward_meta['new_gold'] : ((int)$cmd['gold'] + (($new_mob_hp > 0) ? (int)$total_gold_gain : 0)),
+			'reward_gold' => $reward_meta ? (int)$reward_meta['reward_gold'] : (($new_mob_hp > 0) ? (int)$total_gold_gain : 0),
+			'reward_exp' => $reward_meta ? (int)$reward_meta['reward_exp'] : 0,
+			'new_level' => $reward_meta ? (int)$reward_meta['new_level'] : (int)$cmd['level'],
+			'new_exp' => $reward_meta ? (int)$reward_meta['new_exp'] : (int)$cmd['exp'],
+			'exp_to_next' => $reward_meta ? (int)$reward_meta['exp_to_next'] : get_required_exp_for_next_level((int)$cmd['level']),
+			'stat_points' => $reward_meta ? (int)$reward_meta['stat_points'] : (int)$cmd['stat_points'],
+			'levelup_logs' => $reward_meta ? $reward_meta['levelup_logs'] : array(),
+			'levelup_count' => $reward_meta ? (int)$reward_meta['levelup_count'] : 0
 		));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
@@ -1181,12 +1267,21 @@ function handle_skill(PDO $pdo) {
 			}
 		}
 
-		if ($total_gold_gain > 0) {
+		if ($total_gold_gain > 0 && $new_mob_hp > 0) {
 			$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($total_gold_gain, $uid));
 		}
 
+		$reward_meta = null;
 		if ($new_mob_hp <= 0) {
 			$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 쓰러졌습니다!";
+			$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
+			$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp']);
+			$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
+			foreach ($reward_meta['levelup_logs'] as $levelup_log) {
+				$logs[] = $levelup_log;
+			}
+			$new_hp = (int)$reward_meta['new_hp'];
+			$new_mp = (int)$reward_meta['new_mp'];
 			unset($_SESSION['combat_state']);
 			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")
 				->execute(array($new_hp, $new_mp, $uid));
@@ -1195,7 +1290,24 @@ function handle_skill(PDO $pdo) {
 			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, mob_hp = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $new_mob_hp, $uid));
 		}
 		$pdo->commit();
-		echo json_encode(array('status' => 'success', 'logs' => $logs, 'new_hp' => $new_hp, 'max_hp' => (int)$cmd['max_hp'], 'new_mp' => $new_mp, 'max_mp' => (int)$cmd['max_mp'], 'mob_hp' => $new_mob_hp));
+		echo json_encode(array(
+			'status' => 'success',
+			'logs' => $logs,
+			'new_hp' => $new_hp,
+			'max_hp' => $reward_meta ? (int)$reward_meta['max_hp'] : (int)$cmd['max_hp'],
+			'new_mp' => $new_mp,
+			'max_mp' => $reward_meta ? (int)$reward_meta['max_mp'] : (int)$cmd['max_mp'],
+			'mob_hp' => $new_mob_hp,
+			'new_gold' => $reward_meta ? (int)$reward_meta['new_gold'] : ((int)$cmd['gold'] + (int)$total_gold_gain),
+			'reward_gold' => $reward_meta ? (int)$reward_meta['reward_gold'] : (int)$total_gold_gain,
+			'reward_exp' => $reward_meta ? (int)$reward_meta['reward_exp'] : 0,
+			'new_level' => $reward_meta ? (int)$reward_meta['new_level'] : (int)$cmd['level'],
+			'new_exp' => $reward_meta ? (int)$reward_meta['new_exp'] : (int)$cmd['exp'],
+			'exp_to_next' => $reward_meta ? (int)$reward_meta['exp_to_next'] : get_required_exp_for_next_level((int)$cmd['level']),
+			'stat_points' => $reward_meta ? (int)$reward_meta['stat_points'] : (int)$cmd['stat_points'],
+			'levelup_logs' => $reward_meta ? $reward_meta['levelup_logs'] : array(),
+			'levelup_count' => $reward_meta ? (int)$reward_meta['levelup_count'] : 0
+		));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
 		json_error($e->getMessage());
