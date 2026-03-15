@@ -52,6 +52,16 @@ function http_post_json($url, $payload, $timeout_sec = 10) {
 }
 
 function build_ai_prompt($source_text, $is_story = false, $mode = 'default') {
+	$tone = isset($_SESSION['narrative_tone']) ? (string)$_SESSION['narrative_tone'] : '다크 판타지 톤';
+	$tone_guide = "";
+	if ($tone === '하이텐션 액션 톤') {
+		$tone_guide = "\n톤 지시: 하이텐션 액션 톤으로, 동사 중심의 빠르고 강렬한 리듬으로 작성하세요.";
+	} elseif ($tone === '간결 로그 톤') {
+		$tone_guide = "\n톤 지시: 간결 로그 톤으로, 짧고 명확한 문장 위주로 작성하세요.";
+	} else {
+		$tone_guide = "\n톤 지시: 다크 판타지 톤으로, 음울하고 신비로운 분위기를 유지하세요.";
+	}
+
 	if ($mode === 'combat') {
 		$style = "한국어로 3~5문장의 전투 스크립트를 출력하세요. 공격, 반격, 상태이상, 승패를 시간순으로 간결하게 묘사하세요.";
 	} else {
@@ -63,7 +73,7 @@ function build_ai_prompt($source_text, $is_story = false, $mode = 'default') {
 		. "\n- 옵션/대안/후보를 나열하지 마세요."
 		. "\n- '옵션 1/2/3', 제목, 마크다운(##, **, >)을 절대 쓰지 마세요."
 		. "\n- 설명 없이 최종 문장만 출력하세요.";
-	return $style . $rules . "\n원문: " . $source_text;
+	return $style . $tone_guide . $rules . "\n원문: " . $source_text;
 }
 
 function normalize_ai_output($text) {
@@ -410,6 +420,7 @@ function handle_action(PDO $pdo) {
 			$resp['status'] = 'encounter';
 			$resp['mob_name'] = $mob_name;
 			$resp['mob_max_hp'] = $mob_max_hp;
+			$resp['new_floor'] = $new_floor;
 			$resp['new_mp'] = $new_mp_common;
 			$resp['max_mp'] = (int)$cmd['max_mp'];
 			$log = "⚔️ <b>[{$mob_name}]</b> 출현!";
@@ -492,6 +503,7 @@ function handle_combat(PDO $pdo) {
 		$logs = array();
 		$new_mob_hp = (int)$cmd['mob_hp'];
 		$new_hp = (int)$cmd['hp'];
+		$total_hero_turn_damage = 0;
 
 		$deck_stmt = $pdo->prepare("SELECT hero_rank, hero_name, MAX(level) AS level, SUM(quantity) AS equipped_count FROM tb_heroes WHERE uid = ? AND is_equipped = 1 AND quantity > 0 GROUP BY hero_rank, hero_name");
 		$deck_stmt->execute(array($uid));
@@ -520,7 +532,8 @@ function handle_combat(PDO $pdo) {
 		$physical_heroes = array('늑대전사', '배트맨', '블롭', '베인', '닌자', '마스터 쿤', '골라조', '산적', '야만인', '레인저', '보안관', '호랑이사부');
 		$magic_heroes = array('냥법사', '콜디', '펄스생성기', '오크주술사', '중력자탄', '전기로봇', '충격로봇', '물의정령', '샌드맨', '마마', '아토', '와트', '타르');
 
-		$player_base = ($p_str * 2) + floor($p_mag / 2) + rand(5, 15);
+		// 공격 버튼 기본 피해는 STR 중심으로 계산
+		$player_base = max(1, (int)floor(($p_str * 1.8) + rand(4, 12)));
 		if ($relic_atk_bonus > 0) $player_base = (int)floor($player_base * (1 + ($relic_atk_bonus / 100)));
 		$is_crit = (rand(1, 100) <= $crit_chance);
 		$player_dmg = $is_crit ? floor($player_base * $crit_mult) : $player_base;
@@ -541,7 +554,8 @@ function handle_combat(PDO $pdo) {
 
 					$range_map = array('일반'=>array(5,10,'#aaa'), '희귀'=>array(10,20,'#4caf50'), '영웅'=>array(18,30,'#2196f3'), '전설'=>array(28,45,'#9c27b0'), '신화'=>array(38,60,'#ff5252'), '불멸'=>array(45,75,'#ffeb3b'));
 					$r = isset($range_map[$hero['hero_rank']]) ? $range_map[$hero['hero_rank']] : array(5,10,'#8bc34a');
-					$hero_count = max(1, (int)$hero['equipped_count']);
+					// 수량 누적 폭딜 방지: 전투는 덱 슬롯 기준으로 1개체만 타격
+					$hero_count = 1;
 					$hero_dmg = rand($r[0], $r[1]) * $hero_count;
 					$hero_dmg = (int)floor($hero_dmg * $men_mult);
 					if (in_array($hero['hero_name'], $physical_heroes, true) && $str_party_bonus_pct > 0) {
@@ -560,6 +574,7 @@ function handle_combat(PDO $pdo) {
 
 					$hcrit = $is_h_crit ? "⚡ <span style='color:yellow; font-weight:bold;'>[치명타]</span> " : "⚔️ ";
 					$logs[] = "{$hcrit}<span style='color:{$r[2]}'>[{$hero['hero_name']}]</span>(x{$hero_count})의 공격. {$hero_dmg} 피해.";
+					$total_hero_turn_damage += (int)$hero_dmg;
 					$new_mob_hp = max(0, $new_mob_hp - $hero_dmg);
 				}
 			}
@@ -616,6 +631,8 @@ function handle_combat(PDO $pdo) {
 			'status' => $status,
 			'stream' => true,
 			'logs' => $logs,
+			'player_dmg' => (int)$player_dmg,
+			'hero_dmg' => (int)$total_hero_turn_damage,
 			'new_hp' => $new_hp,
 			'max_hp' => (int)$cmd['max_hp'],
 			'new_mp' => (int)$cmd['mp'],

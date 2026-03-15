@@ -256,6 +256,12 @@ async function doCombatTurn() {
                     streamLog.className = 'log-entry system';
                     streamLog.innerHTML = "<span style='color:#ff5252; font-weight:bold;'>[전투 스크립트 ✨]</span><br><span class='stream-text'></span>";
                     logBox.appendChild(streamLog);
+
+                    const playerDmg = Number(data.player_dmg || 0);
+                    const heroDmg = Number(data.hero_dmg || 0);
+                    const totalDmg = playerDmg + heroDmg;
+                    addLog(`📌 이번 턴 피해: 사령관 ${playerDmg} / 영웅 ${heroDmg} / 합계 ${totalDmg}`);
+
                     logBox.scrollTop = logBox.scrollHeight;
                     const textSpan = streamLog.querySelector('.stream-text');
 

@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error_msg = "명단에 없는 이름입니다. 세렌디피티 길드원 닉네임을 정확히 입력하세요.";
             } else {
                 // 2. 길드원이 맞다면, 사령관 캐릭터를 이미 만들었는지(lucky_dungeon_db) 검사
-                $stmt = $pdo->prepare("SELECT uid, class_type, hp FROM tb_commanders WHERE nickname = ?");
+                $stmt = $pdo->prepare("SELECT uid, class_type, hp, narrative_tone FROM tb_commanders WHERE nickname = ?");
                 $stmt->execute([$nickname]);
                 $user = $stmt->fetch();
 
@@ -37,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['uid'] = $user['uid'];
                     $_SESSION['nickname'] = $nickname;
                     $_SESSION['class_type'] = $user['class_type'];
+                    $_SESSION['narrative_tone'] = !empty($user['narrative_tone']) ? $user['narrative_tone'] : '다크 판타지 톤';
                     
                     header("Location: index.php");
                     exit;

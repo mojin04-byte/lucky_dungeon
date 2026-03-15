@@ -83,6 +83,9 @@ function index_exists(PDO $pdo, string $table, string $index): bool {
 
 try {
     // 자동 탐험 컬럼 보강 (MySQL 5.6 호환)
+    if (!column_exists($pdo, 'tb_commanders', 'narrative_tone')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `narrative_tone` VARCHAR(30) NOT NULL DEFAULT '다크 판타지 톤' COMMENT '내레이션 톤'");
+    }
     if (!column_exists($pdo, 'tb_commanders', 'auto_explore_start_time')) {
         $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `auto_explore_start_time` DATETIME NULL COMMENT '자동 탐험 시작 시각'");
     }
