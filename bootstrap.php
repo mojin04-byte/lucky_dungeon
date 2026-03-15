@@ -148,7 +148,8 @@ define('GEMINI_API_KEY', getenv('GEMINI_API_KEY'));
 
 // Gemini API URL
 $gemini_key = getenv('GEMINI_API_KEY');
-define('GEMINI_API_URL', "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={$gemini_key}");
+$gemini_model = getenv('GEMINI_MODEL') ?: 'gemini-2.5-flash-lite';
+define('GEMINI_API_URL', "https://generativelanguage.googleapis.com/v1beta/models/{$gemini_model}:generateContent?key={$gemini_key}");
 
 // ==========================================
 // 5. 게임 데이터 로드

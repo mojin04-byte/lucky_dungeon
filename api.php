@@ -35,6 +35,144 @@ set_error_handler(function($severity, $message, $file, $line) {
 
 $GLOBALS['colors'] = array('일반'=>'#aaa', '희귀'=>'#4caf50', '영웅'=>'#2196f3', '전설'=>'#9c27b0', '신화'=>'#ff5252', '불멸'=>'#ffeb3b', '유일'=>'#00e5ff');
 
+function http_post_json($url, $payload, $timeout_sec = 10) {
+	$ch = curl_init($url);
+	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+	curl_setopt($ch, CURLOPT_POST, true);
+	curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
+	curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+	curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
+	curl_setopt($ch, CURLOPT_TIMEOUT, max(1, (int)$timeout_sec));
+	$raw = curl_exec($ch);
+	$errno = curl_errno($ch);
+	$err = curl_error($ch);
+	$code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+	curl_close($ch);
+	return array('ok' => ($errno === 0 && $code >= 200 && $code < 300), 'raw' => $raw, 'errno' => $errno, 'error' => $err, 'http' => $code);
+}
+
+function build_ai_prompt($source_text, $is_story = false, $mode = 'default') {
+	if ($mode === 'combat') {
+		$style = "한국어로 3~5문장의 전투 스크립트를 출력하세요. 공격, 반격, 상태이상, 승패를 시간순으로 간결하게 묘사하세요.";
+	} else {
+		$style = $is_story
+			? "한국어로 2~4문장의 판타지 내레이션만 출력하세요."
+			: "한국어로 게임 로그 내레이션 1~3문장만 출력하세요.";
+	}
+	$rules = "\n규칙:"
+		. "\n- 옵션/대안/후보를 나열하지 마세요."
+		. "\n- '옵션 1/2/3', 제목, 마크다운(##, **, >)을 절대 쓰지 마세요."
+		. "\n- 설명 없이 최종 문장만 출력하세요.";
+	return $style . $rules . "\n원문: " . $source_text;
+}
+
+function normalize_ai_output($text) {
+	$t = trim((string)$text);
+	if ($t === '') return $t;
+
+	// 옵션 나열 출력이 들어오면 첫 옵션만 채택
+	if (preg_match_all('/옵션\s*\d+\s*:\s*(.+?)(?=(옵션\s*\d+\s*:)|$)/us', $t, $m) && !empty($m[1])) {
+		$t = trim((string)$m[1][0]);
+	}
+
+	// 불필요한 마크다운/접두어 제거
+	$t = preg_replace('/^\s*#{1,6}\s*/um', '', $t);
+	$t = str_replace(array('**', '__'), '', $t);
+	$t = preg_replace('/^\s*>\s*/um', '', $t);
+	$t = preg_replace('/\s+/u', ' ', $t);
+	return trim($t);
+}
+
+function request_ai_text_with_fallback($source_text, $is_story = false, $mode = 'default') {
+	$prompt = build_ai_prompt($source_text, $is_story, $mode);
+
+	// 1) 기본: Ollama (3초 응답 제한)
+	$ollama_url = defined('OLLAMA_URL') ? trim((string)OLLAMA_URL) : '';
+	$ollama_model = defined('OLLAMA_MODEL') ? trim((string)OLLAMA_MODEL) : '';
+	if ($ollama_url !== '' && $ollama_model !== '') {
+		$endpoint = rtrim($ollama_url, '/');
+		if (substr($endpoint, -13) !== '/api/generate') {
+			$endpoint .= '/api/generate';
+		}
+		$res = http_post_json($endpoint, array(
+			'model' => $ollama_model,
+			'prompt' => $prompt,
+			'stream' => false,
+			'keep_alive' => '30m',
+			'options' => array(
+				'num_predict' => 96,
+				'temperature' => 0.7,
+				'top_p' => 0.9,
+			),
+		), 3);
+		if ($res['ok'] && $res['raw']) {
+			$decoded = json_decode($res['raw'], true);
+			if (isset($decoded['response']) && trim((string)$decoded['response']) !== '') {
+				app_log('ai.provider', array('provider' => 'ollama', 'fallback' => false));
+				return array('text' => normalize_ai_output((string)$decoded['response']), 'provider' => 'ollama', 'model' => $ollama_model);
+			}
+		}
+		app_log('ai.ollama.failed', array('errno' => $res['errno'], 'http' => $res['http'], 'error' => $res['error']));
+	}
+
+	// 2) 폴백: Gemini 2.5 Flash Mini
+	$gemini_key = defined('GEMINI_API_KEY') ? trim((string)GEMINI_API_KEY) : '';
+	$gemini_url = defined('GEMINI_API_URL') ? trim((string)GEMINI_API_URL) : '';
+	if ($gemini_key !== '' && $gemini_url !== '') {
+		$res = http_post_json($gemini_url, array(
+			'contents' => array(
+				array('parts' => array(array('text' => $prompt)))
+			),
+			'generationConfig' => array('temperature' => 0.8, 'topP' => 0.9)
+		), 12);
+		if ($res['ok'] && $res['raw']) {
+			$decoded = json_decode($res['raw'], true);
+			if (isset($decoded['candidates'][0]['content']['parts']) && is_array($decoded['candidates'][0]['content']['parts'])) {
+				$text = '';
+				foreach ($decoded['candidates'][0]['content']['parts'] as $part) {
+					if (isset($part['text'])) $text .= (string)$part['text'];
+				}
+				if (trim($text) !== '') {
+					app_log('ai.provider', array('provider' => 'gemini-2.5-flash-mini', 'fallback' => true));
+					$model = 'gemini-2.5-flash-lite';
+					if (defined('GEMINI_API_URL') && preg_match('#/models/([^:]+):generateContent#', (string)GEMINI_API_URL, $mm)) {
+						$model = $mm[1];
+					}
+					return array('text' => normalize_ai_output($text), 'provider' => 'gemini', 'model' => $model);
+				}
+			}
+		}
+		app_log('ai.gemini.failed', array('errno' => $res['errno'], 'http' => $res['http'], 'error' => $res['error']));
+	}
+
+	// 3) 최종 폴백: 원문 반환
+	app_log('ai.provider', array('provider' => 'raw', 'fallback' => true));
+	return array('text' => normalize_ai_output((string)$source_text), 'provider' => 'raw', 'model' => 'local-fallback');
+}
+
+function stream_text_as_sse($text, $sleep_us = 28000, $meta = null) {
+	if (is_array($meta)) {
+		echo 'data: ' . json_encode(array('meta' => $meta), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
+		@ob_flush(); @flush();
+	}
+	$chars = preg_split('//u', (string)$text, -1, PREG_SPLIT_NO_EMPTY);
+	if (!$chars) $chars = array((string)$text);
+	$buffer = '';
+	foreach ($chars as $ch) {
+		$buffer .= $ch;
+		if (strlen($buffer) >= rand(2, 6)) {
+			echo 'data: ' . json_encode(array('text' => $buffer), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
+			$buffer = '';
+			@ob_flush(); @flush();
+			usleep($sleep_us);
+		}
+	}
+	if ($buffer !== '') {
+		echo 'data: ' . json_encode(array('text' => $buffer), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
+		@ob_flush(); @flush();
+	}
+}
+
 function json_error($msg, $extra = array()) {
 	echo json_encode(array_merge(array('status' => 'error', 'msg' => $msg), $extra));
 }
@@ -208,6 +346,8 @@ function apply_hero_skills(&$hero, &$new_mob_hp, &$logs, &$total_gold_gain, &$cm
 
 		$chance = isset($skill_def['trigger_chance']) ? (int)$skill_def['trigger_chance'] : 0;
 		if ($chance <= 0 && isset($skill_def['description']) && preg_match('/(\d+)% 확률/', $skill_def['description'], $m)) $chance = (int)$m[1];
+		$men_skill_bonus = max(0, (int)floor(((int)$cmd['stat_men']) / 10) * 2);
+		if ($chance > 0) $chance = min(95, $chance + $men_skill_bonus);
 		if (!$is_passive && $chance > 0 && rand(1, 100) > $chance) continue;
 
 		$effects = get_skill_effects_for_level($skill_def, $skill_level);
@@ -235,6 +375,12 @@ function handle_action(PDO $pdo) {
 		$new_floor = $current_floor;
 		$max_floor = max((int)$cmd['max_floor'], $current_floor);
 		$event_roll = rand(1, 100);
+		$p_str = (int)$cmd['stat_str'];
+		$p_mag = (int)$cmd['stat_mag'];
+		$p_luk = (int)$cmd['stat_luk'];
+		$p_vit = (int)$cmd['stat_vit'];
+		$mp_regen = max(0, (int)floor($p_mag / 10));
+		$new_mp_common = min((int)$cmd['max_mp'], (int)$cmd['mp'] + $mp_regen);
 
 		$resp = array('status' => 'safe');
 		$log = '';
@@ -259,17 +405,19 @@ function handle_action(PDO $pdo) {
 				$mob_atk = (8 + rand(0, 5)) * $diff;
 			}
 
-			$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, is_combat = 1, mob_name = ?, mob_hp = ?, mob_max_hp = ?, mob_atk = ? WHERE uid = ?")
-				->execute(array($new_floor, $max_floor, $mob_name, $mob_max_hp, $mob_max_hp, $mob_atk, $uid));
+			$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, mp = ?, is_combat = 1, mob_name = ?, mob_hp = ?, mob_max_hp = ?, mob_atk = ? WHERE uid = ?")
+				->execute(array($new_floor, $max_floor, $new_mp_common, $mob_name, $mob_max_hp, $mob_max_hp, $mob_atk, $uid));
 			$resp['status'] = 'encounter';
 			$resp['mob_name'] = $mob_name;
 			$resp['mob_max_hp'] = $mob_max_hp;
+			$resp['new_mp'] = $new_mp_common;
+			$resp['max_mp'] = (int)$cmd['max_mp'];
 			$log = "⚔️ <b>[{$mob_name}]</b> 출현!";
 		} else {
 			// 안전 이벤트
 			$hp = (int)$cmd['hp'];
 			$max_hp = (int)$cmd['max_hp'];
-			$mp = (int)$cmd['mp'];
+			$mp = $new_mp_common;
 			$max_mp = (int)$cmd['max_mp'];
 
 			if ($event_roll <= 48) {
@@ -278,7 +426,8 @@ function handle_action(PDO $pdo) {
 				$hp = min($max_hp, $hp + 10);
 				$log = "👣 <b>[층 이동]</b> 지하 {$new_floor}층으로 내려갑니다.";
 			} elseif ($event_roll <= 68) {
-				$gold = rand(20, 120) * max(1, floor($current_floor / 2));
+				$base_gold = rand(20, 120) * max(1, floor($current_floor / 2));
+				$gold = (int)floor($base_gold * (1 + ($p_luk * 0.01)));
 				$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($gold, $uid));
 				$log = "💰 <b>[획득]</b> {$gold}G를 발견했습니다.";
 			} elseif ($event_roll <= 84) {
@@ -286,9 +435,20 @@ function handle_action(PDO $pdo) {
 				$hp = min($max_hp, $hp + $heal);
 				$log = "💚 <b>[회복]</b> 체력 +{$heal}";
 			} else {
-				$dmg = rand(5, 15);
-				$hp = max(1, $hp - $dmg);
-				$log = "🩸 <b>[함정]</b> 체력 -{$dmg}";
+				$break_chance = min(35, (int)floor($p_str / 3));
+				if (rand(1, 100) <= $break_chance) {
+					$log = "🪓 <b>[STR 발동]</b> 힘으로 함정을 부숴 피해를 무효화했습니다!";
+				} else {
+					$dmg = max(1, rand(5, 15) - (int)floor($p_vit / 2));
+					if (rand(1, 100) <= min(40, (int)floor($p_luk / 2))) {
+						$lucky = (int)floor(rand(5, 25) * (1 + ($p_luk * 0.01)));
+						$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($lucky, $uid));
+						$log = "🍀 <b>[행운 발동]</b> 함정을 비켜가고 {$lucky}G를 주웠습니다.";
+					} else {
+						$hp = max(1, $hp - $dmg);
+						$log = "🩸 <b>[함정]</b> 체력 -{$dmg}";
+					}
+				}
 			}
 
 			$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, hp = ?, mp = ? WHERE uid = ?")
@@ -302,6 +462,8 @@ function handle_action(PDO $pdo) {
 		}
 
 		$resp['log'] = $log;
+		$resp['stream'] = true;
+		$_SESSION['ai_stream_text'] = $log;
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
 		$pdo->commit();
 		echo json_encode($resp);
@@ -352,6 +514,11 @@ function handle_combat(PDO $pdo) {
 		$men_mult = 1 + ($p_men * 0.005);
 		$agi_double_chance = floor($p_agi / 5);
 		$vit_block_chance = floor($p_vit / 5);
+		$hero_shield_chance = (count($deck) > 0) ? min(40, (int)floor($p_vit / 10)) : 0;
+		$str_party_bonus_pct = (int)floor($p_str / 10) * 2;
+		$mag_party_bonus_pct = (int)floor($p_mag / 10) * 2;
+		$physical_heroes = array('늑대전사', '배트맨', '블롭', '베인', '닌자', '마스터 쿤', '골라조', '산적', '야만인', '레인저', '보안관', '호랑이사부');
+		$magic_heroes = array('냥법사', '콜디', '펄스생성기', '오크주술사', '중력자탄', '전기로봇', '충격로봇', '물의정령', '샌드맨', '마마', '아토', '와트', '타르');
 
 		$player_base = ($p_str * 2) + floor($p_mag / 2) + rand(5, 15);
 		if ($relic_atk_bonus > 0) $player_base = (int)floor($player_base * (1 + ($relic_atk_bonus / 100)));
@@ -377,6 +544,11 @@ function handle_combat(PDO $pdo) {
 					$hero_count = max(1, (int)$hero['equipped_count']);
 					$hero_dmg = rand($r[0], $r[1]) * $hero_count;
 					$hero_dmg = (int)floor($hero_dmg * $men_mult);
+					if (in_array($hero['hero_name'], $physical_heroes, true) && $str_party_bonus_pct > 0) {
+						$hero_dmg = (int)floor($hero_dmg * (1 + ($str_party_bonus_pct / 100)));
+					} elseif (in_array($hero['hero_name'], $magic_heroes, true) && $mag_party_bonus_pct > 0) {
+						$hero_dmg = (int)floor($hero_dmg * (1 + ($mag_party_bonus_pct / 100)));
+					}
 
 					$armor_break_flat = isset($_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value']) ? (float)$_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value'] : 0;
 					if ($armor_break_flat > 0) $hero_dmg = (int)floor($hero_dmg * (1 + min(2.0, $armor_break_flat / 100.0)));
@@ -407,6 +579,9 @@ function handle_combat(PDO $pdo) {
 				$logs[] = "🧊 <b>{$cmd['mob_name']}</b>은(는) 상태이상으로 행동하지 못했습니다.";
 				$_SESSION['combat_state']['enemy_debuffs']['stun']['turns_left'] = max(0, $stun_turns - 1);
 				$status = 'ongoing';
+			} elseif ($hero_shield_chance > 0 && rand(1, 100) <= $hero_shield_chance) {
+				$logs[] = "🛡️ <span style='color:#80cbc4; font-weight:bold;'>[VIT 시너지]</span> 영웅의 보호막이 반격을 상쇄했습니다!";
+				$status = 'ongoing';
 			} elseif (rand(1, 100) <= $vit_block_chance) {
 				$logs[] = "🛡️ <span style='color:orange; font-weight:bold;'>[VIT 특성 발동]</span> 사령관이 공격을 막아냈습니다!";
 				$status = 'ongoing';
@@ -433,11 +608,13 @@ function handle_combat(PDO $pdo) {
 
 		$final_log = implode('<br>', $logs);
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $final_log));
+		$_SESSION['ai_stream_text'] = strip_tags($final_log);
+		$_SESSION['combat_stream_text'] = strip_tags($final_log);
 		$pdo->commit();
 
 		echo json_encode(array(
 			'status' => $status,
-			'stream' => false,
+			'stream' => true,
 			'logs' => $logs,
 			'new_hp' => $new_hp,
 			'max_hp' => (int)$cmd['max_hp'],
@@ -670,13 +847,14 @@ function handle_skill(PDO $pdo) {
 		$new_hp = (int)$cmd['hp'];
 		$new_mob_hp = (int)$cmd['mob_hp'];
 		$logs = array("🔮 <b>[{$skill['name']}]</b> 시전! (MP -{$skill['cost']})");
+		$mag_amp = 1 + ((int)$cmd['stat_mag'] * 0.01);
 
 		if ($skill['type'] === 'damage') {
-			$damage = (int)$skill['value'] + floor((int)$cmd['stat_mag'] * 1.5);
+			$damage = (int)floor(((int)$skill['value'] + floor((int)$cmd['stat_mag'] * 1.5)) * $mag_amp);
 			$new_mob_hp = max(0, $new_mob_hp - $damage);
 			$logs[] = "💥 몬스터에게 <span style='color:red;'>{$damage}</span> 피해.";
 		} elseif ($skill['type'] === 'heal') {
-			$heal = (int)$skill['value'] + floor((int)$cmd['stat_men'] * 2);
+			$heal = (int)floor(((int)$skill['value'] + floor((int)$cmd['stat_men'] * 2) + floor((int)$cmd['stat_mag'] * 0.8)) * (1 + ((int)$cmd['stat_mag'] * 0.005)));
 			$new_hp = min((int)$cmd['max_hp'], $new_hp + $heal);
 			$logs[] = "💚 체력을 <span style='color:lightgreen;'>{$heal}</span> 회복.";
 		} else {
@@ -765,8 +943,19 @@ function handle_summon(PDO $pdo) {
 		if ((int)$cmd['gold'] < $summon_cost) throw new Exception('마력석(Gold)이 부족합니다.');
 		$pdo->prepare("UPDATE tb_commanders SET gold = gold - ? WHERE uid = ?")->execute(array($summon_cost, $uid));
 
-		$weights = array('신화' => 1, '전설' => 4, '영웅' => 10, '희귀' => 25, '일반' => 60);
-		$roll = rand(1, 100);
+		$luk = (int)$cmd['stat_luk'];
+		// 신화는 영웅 소환에서 제외합니다.
+		// 1bp = 0.01% (10000bp = 100%)
+		// Base rates at LUK 0:
+		// 전설 0.20%, 영웅 1.50%, 희귀 8.00%, 일반 90.30%
+		$weights = array('전설' => 20, '영웅' => 150, '희귀' => 800, '일반' => 9030);
+		$weights['전설'] += (int)floor($luk / 35) * 3;  // +0.03% per 35 LUK
+		$weights['영웅'] += (int)floor($luk / 20) * 10; // +0.10% per 20 LUK
+		$weights['희귀'] += (int)floor($luk / 15) * 20; // +0.20% per 15 LUK
+		$boost_total = ($weights['전설'] - 20) + ($weights['영웅'] - 150) + ($weights['희귀'] - 800);
+		$weights['일반'] = max(1000, 9030 - $boost_total); // 일반 최소 10.00%
+		$total_weight = array_sum($weights);
+		$roll = rand(1, $total_weight);
 		$acc = 0;
 		$rank = '일반';
 		foreach ($weights as $r => $w) {
@@ -779,8 +968,12 @@ function handle_summon(PDO $pdo) {
 			if (isset($def['rank']) && $def['rank'] === $rank) $pool[] = $name;
 		}
 		if (empty($pool)) {
-			foreach ($hero_data as $name => $def) { $pool[] = $name; }
-			$rank = isset($hero_data[$pool[0]]['rank']) ? $hero_data[$pool[0]]['rank'] : '일반';
+			foreach ($hero_data as $name => $def) {
+				if (isset($def['rank']) && in_array($def['rank'], array('일반', '희귀', '영웅', '전설'), true)) {
+					$pool[] = $name;
+				}
+			}
+			$rank = (empty($pool) || !isset($hero_data[$pool[0]]['rank'])) ? '일반' : $hero_data[$pool[0]]['rank'];
 		}
 		$hero_name = $pool[array_rand($pool)];
 
@@ -1045,61 +1238,191 @@ function handle_combine(PDO $pdo) {
 	$target_name = isset($_POST['target_name']) ? $_POST['target_name'] : '';
 	global $hero_data;
 
-	$evolution_recipes = array('개구리 왕자 (▶ 킹 다이안)' => '사신 다이안 (사신 개구리 승천형)');
+	$mythic_recipes = array(
+		'닌자' => array('enabled' => true, 'materials' => array('늑대전사', '성기사', '악마병사')),
+		'블롭' => array('enabled' => true, 'materials' => array('사냥꾼', '독수리장군', '산적')),
+		'중력자탄' => array('enabled' => true, 'materials' => array('전기로봇', '충격로봇', '투척병', '투척병')),
+		'오크주술사' => array('enabled' => false, 'materials' => array('사냥꾼', '전기로봇', '악마병사')),
+		'펄스생성기' => array('enabled' => true, 'materials' => array('전기로봇', '나무', '궁수', '궁수')),
+		'냥법사' => array('enabled' => false, 'materials' => array('독수리장군', '궁수', '물의정령', '물의정령')),
+		'밤바' => array('enabled' => true, 'materials' => array('호랑이사부', '늑대전사', '야만인')),
+		'헤일리' => array('enabled' => true, 'materials' => array('보안관', '사냥꾼', '샌드맨')),
+		'콜디' => array('enabled' => true, 'materials' => array('폭풍거인', '샌드맨', '물의정령')),
+		'랜슬롯' => array('enabled' => false, 'materials' => array('보안관', '사냥꾼', '성기사')),
+		'아이언미야옹' => array('enabled' => true, 'materials' => array('워머신', '산적', '산적')),
+		'드래곤' => array('enabled' => true, 'materials' => array('독수리장군', '독수리장군', '물의정령')),
+		'모노폴리맨' => array('enabled' => false, 'materials' => array('늑대전사', '나무', '악마병사')),
+		'마마' => array('enabled' => true, 'materials' => array('사냥꾼', '나무', '전기로봇')),
+		'개구리 왕자' => array('enabled' => true, 'materials' => array('늑대전사', '나무', '야만인', '투척병')),
+		'배트맨' => array('enabled' => true, 'materials' => array('호랑이사부', '나무', '투척병', '투척병')),
+		'베인' => array('enabled' => true, 'materials' => array('폭풍거인', '사냥꾼', '레인저', '궁수')),
+		'인디' => array('enabled' => false, 'materials' => array('보안관', '늑대전사', '샌드맨')),
+		'와트' => array('enabled' => false, 'materials' => array('폭풍거인', '전기로봇', '악마병사')),
+		'타르' => array('enabled' => false, 'materials' => array('늑대전사', '사냥꾼', '샌드맨', '야만인')),
+		'로켓츄' => array('enabled' => false, 'materials' => array('워머신', '충격로봇', '투척병')),
+		'우치' => array('enabled' => false, 'materials' => array('폭풍거인', '레인저', '물의정령')),
+		'지지' => array('enabled' => false, 'materials' => array('보안관', '전기로봇', '악마병사', '궁수')),
+		'마스터 쿤' => array('enabled' => true, 'materials' => array('호랑이사부', '독수리장군', '성기사')),
+		'초나' => array('enabled' => false, 'materials' => array('보안관', '나무', '악마병사', '야만인')),
+		'펭귄악사' => array('enabled' => true, 'materials' => array('독수리장군', '늑대전사', '전기로봇')),
+		'아토' => array('enabled' => true, 'materials' => array('나무', '사냥꾼', '악마병사', '야만인')),
+		'로카' => array('enabled' => true, 'materials' => array('호랑이사부', '보안관', '독수리장군', '궁수')),
+		'골라조' => array('enabled' => true, 'materials' => array('호랑이사부', '나무', '레인저', '산적')),
+	);
+
+	$evolution_recipes = array(
+		'닌자' => '귀신 닌자',
+		'블롭' => '블롭단',
+		'중력자탄' => '슈퍼 중력자탄',
+		'펄스생성기' => '닥터 펄스',
+		'밤바' => '원시 밤바',
+		'헤일리' => '각성 헤일리',
+		'콜디' => '여왕 콜디',
+		'아이언미야옹' => '아이엠 미야옹',
+		'드래곤' => '마왕 드래곤',
+		'마마' => '그랜드 마마',
+		'개구리 왕자' => '사신 다이안 (사신 개구리 승천형)',
+		'배트맨' => '에이스 배트맨',
+		'베인' => '탑 베인',
+		'마스터 쿤' => '불멸 쿤',
+		'펭귄악사' => '소음킹 펭귄악사',
+		'아토' => '시공 아토',
+		'로카' => '캡틴 로카',
+		'골라조' => '보스 골라조',
+	);
+	// NOTE: 현재 공통 진화 조건은 "신화 영웅 전투 1000회"입니다.
+	// 추후 영웅별로 조건(전투 횟수, 재료, 층수 등)을 분기할 수 있도록 requirements 맵 구조를 유지합니다.
+	$evolution_requirements = array();
+	foreach ($evolution_recipes as $mythic_name => $_immortal_name) {
+		$evolution_requirements[$mythic_name] = array('battle_count' => 1000);
+	}
+
+	$hero_aliases = array(
+		'개구리 왕자' => array('개구리 왕자', '개구리 왕자 (▶ 킹 다이안)'),
+		'소음킹 펭귄악사' => array('소음킹 펭귄악사', '소음킹'),
+		'캡틴 로카' => array('캡틴 로카', '캡틴로카'),
+		'보스 골라조' => array('보스 골라조', '보스골라조'),
+		'불멸 쿤' => array('불멸 쿤', '마스터 쿤 (불멸)', '마스터 쿤')
+	);
+
+	$get_aliases = function($name) use ($hero_aliases) {
+		if (isset($hero_aliases[$name])) return $hero_aliases[$name];
+		return array($name);
+	};
+
+	$fetch_available_count = function($name) use ($pdo, $uid, $get_aliases) {
+		$aliases = $get_aliases($name);
+		$ph = implode(',', array_fill(0, count($aliases), '?'));
+		$params = array_merge(array($uid), $aliases);
+		$sql = "SELECT COALESCE(SUM(quantity),0) FROM tb_heroes WHERE uid = ? AND hero_name IN ({$ph}) AND quantity > 0 AND is_equipped = 0 AND is_on_expedition = 0";
+		$st = $pdo->prepare($sql);
+		$st->execute($params);
+		return (int)$st->fetchColumn();
+	};
+
+	$fetch_max_battle_count = function($name) use ($pdo, $uid, $get_aliases) {
+		$aliases = $get_aliases($name);
+		$ph = implode(',', array_fill(0, count($aliases), '?'));
+		$params = array_merge(array($uid), $aliases);
+		$sql = "SELECT COALESCE(MAX(battle_count),0) FROM tb_heroes WHERE uid = ? AND hero_name IN ({$ph}) AND quantity > 0";
+		$st = $pdo->prepare($sql);
+		$st->execute($params);
+		return (int)$st->fetchColumn();
+	};
+
+	$render_view = function() use ($mythic_recipes, $evolution_recipes, $evolution_requirements, $fetch_available_count, $fetch_max_battle_count) {
+		$html = '<div style="background:#222; padding:15px; border-radius:5px; margin-bottom:20px;">';
+		$html .= '<h3 style="color:#ff5252; margin-top:0;">신화 조합 (레시피)</h3>';
+		$html .= '<p style="color:#ccc; font-size:0.9rem;">출전/파견 중이 아닌 재료 영웅을 소모해 대상 신화를 직접 조합합니다.</p>';
+		foreach ($mythic_recipes as $mythic => $info) {
+			$req_counts = array_count_values($info['materials']);
+			$can_craft = (bool)$info['enabled'];
+			$parts = array();
+			foreach ($req_counts as $mat => $need) {
+				$owned = $fetch_available_count($mat);
+				if ($owned < $need) $can_craft = false;
+				$parts[] = "{$mat} {$owned}/{$need}";
+			}
+			$safe_name = str_replace("'", "\\'", $mythic);
+			$html .= "<div style='padding:10px; border:1px solid #444; margin-top:8px; border-radius:4px;'>";
+			$html .= "<b style='color:#ff8a80;'>[신화]</b> <b>{$mythic}</b><br><span style='color:#aaa; font-size:0.85rem;'>재료: " . implode(' + ', $parts) . "</span>";
+			if (!$info['enabled']) {
+				$html .= "<button class='btn' style='float:right; background:#555;' disabled>불가</button>";
+			} elseif ($can_craft) {
+				$html .= "<button class='btn' style='float:right;' onclick=\"if(confirm('{$mythic} 조합을 진행하시겠습니까?')) combineHero('combine_mythic', '{$safe_name}')\">조합</button>";
+			} else {
+				$html .= "<button class='btn' style='float:right; background:#555;' disabled>재료 부족</button>";
+			}
+			$html .= "<div style='clear:both;'></div></div>";
+		}
+		$html .= '</div><div style="background:#222; padding:15px; border-radius:5px;">';
+		$html .= '<h3 style="color:#ffeb3b; margin-top:0;">불멸 진화</h3>';
+		$html .= '<p style="color:#ccc; font-size:0.9rem;">진화 조건: 대상 신화 영웅 전투 1000회</p>';
+		$has_evolve = false;
+		foreach ($evolution_recipes as $mythic => $immortal) {
+			$owned = $fetch_available_count($mythic);
+			if ($owned <= 0) continue;
+			$has_evolve = true;
+			$need_battles = isset($evolution_requirements[$mythic]['battle_count']) ? (int)$evolution_requirements[$mythic]['battle_count'] : 1000;
+			$max_battle = $fetch_max_battle_count($mythic);
+			$can_evolve = ($max_battle >= $need_battles);
+			$safe_mythic = str_replace("'", "\\'", $mythic);
+			$html .= "<div style='padding:10px; border:1px solid #444; margin-top:10px; border-radius:4px;'><strong>{$mythic}</strong> ▶ <strong>{$immortal}</strong>";
+			$html .= "<div style='color:#aaa; font-size:0.85rem; margin-top:4px;'>전투: {$max_battle} / {$need_battles}</div>";
+			if ($can_evolve) {
+				$html .= "<button class='btn' style='background:#ffeb3b; color:#000; float:right;' onclick=\"if(confirm('{$mythic}을(를) {$immortal}(으)로 진화시키겠습니까?')) combineHero('evolve', '{$safe_mythic}')\">진화</button>";
+			} else {
+				$html .= "<button class='btn' style='background:#555; float:right;' disabled>전투 횟수 부족</button>";
+			}
+			$html .= "<div style='clear:both;'></div></div>";
+		}
+		if (!$has_evolve) $html .= '<p style="color:#777; text-align:center;">진화 가능한 영웅이 없습니다.</p>';
+		$html .= '</div>';
+		return $html;
+	};
 
 	try {
 		if ($mode === 'view') {
-			$st = $pdo->prepare("SELECT hero_name, hero_rank, quantity, level, inv_id FROM tb_heroes WHERE uid = ? AND quantity > 0");
-			$st->execute(array($uid));
-			$owned = $st->fetchAll();
-
-			$legendary = array();
-			$evolvable = array();
-			foreach ($owned as $h) {
-				if ($h['hero_rank'] === '전설') $legendary[] = $h;
-				if (array_key_exists($h['hero_name'], $evolution_recipes)) $evolvable[] = $h;
-			}
-
-			$html = '<div style="background:#222; padding:15px; border-radius:5px; margin-bottom:20px;">';
-			$html .= '<h3 style="color:#ff5252; margin-top:0;">신화 조합</h3>';
-			$html .= '<p style="color:#ccc; font-size:0.9rem;">고유한 전설 등급 영웅 4명을 소모하여 무작위 신화 영웅 1명을 소환합니다.</p>';
-			$html .= '<strong>보유한 전설 영웅:</strong> ' . count($legendary) . '명<br><br>';
-			if (count($legendary) >= 4) $html .= '<button class="btn" style="background:#ff5252; width:100%;" onclick="combineHero(\'combine_mythic\', \'\')">신화 조합 실행</button>';
-			else $html .= '<button class="btn" style="background:#555; width:100%;" disabled>전설 영웅 부족</button>';
-			$html .= '</div><div style="background:#222; padding:15px; border-radius:5px;">';
-			$html .= '<h3 style="color:#ffeb3b; margin-top:0;">불멸 진화</h3>';
-			if (!empty($evolvable)) {
-				foreach ($evolvable as $h) {
-					$evolved = $evolution_recipes[$h['hero_name']];
-					$html .= "<div style='padding:10px; border:1px solid #444; margin-top:10px; border-radius:4px;'><strong>{$h['hero_name']}</strong> ▶ <strong>{$evolved}</strong><button class='btn' style='background:#ffeb3b; color:#000; float:right;' onclick=\"if(confirm('{$h['hero_name']}을(를) {$evolved}(으)로 진화시키겠습니까?')) combineHero('evolve', '{$h['hero_name']}')\">진화</button></div>";
-				}
-			} else {
-				$html .= '<p style="color:#777; text-align:center;">진화 가능한 영웅이 없습니다.</p>';
-			}
-			$html .= '</div>';
-			echo json_encode(array('status' => 'success', 'html' => $html));
+			echo json_encode(array('status' => 'success', 'html' => $render_view()));
 			return;
 		}
 
 		if ($mode === 'combine_mythic') {
-			$pdo->beginTransaction();
-			$st = $pdo->prepare("SELECT inv_id, hero_name, quantity FROM tb_heroes WHERE uid = ? AND hero_rank = '전설' AND quantity > 0 FOR UPDATE");
-			$st->execute(array($uid));
-			$legs = $st->fetchAll();
-			if (count($legs) < 4) throw new Exception('조합에 필요한 전설 영웅이 부족합니다.');
+			if (!isset($mythic_recipes[$target_name])) throw new Exception('알 수 없는 신화 조합 레시피입니다.');
+			$recipe = $mythic_recipes[$target_name];
+			if (!$recipe['enabled']) throw new Exception('해당 신화 조합은 현재 불가입니다.');
 
-			$consumed = array_slice($legs, 0, 4);
-			$names = array();
-			foreach ($consumed as $h) {
-				$names[] = $h['hero_name'];
-				if ((int)$h['quantity'] > 1) $pdo->prepare("UPDATE tb_heroes SET quantity = quantity - 1 WHERE inv_id = ?")->execute(array($h['inv_id']));
-				else $pdo->prepare("DELETE FROM tb_heroes WHERE inv_id = ?")->execute(array($h['inv_id']));
+			$pdo->beginTransaction();
+			$req_counts = array_count_values($recipe['materials']);
+			$used_text = array();
+			foreach ($req_counts as $mat => $need) {
+				$aliases = $get_aliases($mat);
+				$ph = implode(',', array_fill(0, count($aliases), '?'));
+				$params = array_merge(array($uid), $aliases);
+				$sql = "SELECT inv_id, hero_name, quantity FROM tb_heroes WHERE uid = ? AND hero_name IN ({$ph}) AND quantity > 0 AND is_equipped = 0 AND is_on_expedition = 0 ORDER BY quantity DESC, inv_id ASC FOR UPDATE";
+				$st = $pdo->prepare($sql);
+				$st->execute($params);
+				$rows = $st->fetchAll();
+				$total = 0;
+				foreach ($rows as $r) $total += (int)$r['quantity'];
+				if ($total < $need) throw new Exception("조합 재료 부족: {$mat} ({$total}/{$need})");
+
+				$left = $need;
+				foreach ($rows as $r) {
+					if ($left <= 0) break;
+					$have = (int)$r['quantity'];
+					$use = min($left, $have);
+					if ($have > $use) {
+						$pdo->prepare("UPDATE tb_heroes SET quantity = quantity - ? WHERE inv_id = ?")->execute(array($use, $r['inv_id']));
+					} else {
+						$pdo->prepare("DELETE FROM tb_heroes WHERE inv_id = ?")->execute(array($r['inv_id']));
+					}
+					$left -= $use;
+				}
+				$used_text[] = "{$mat} x{$need}";
 			}
 
-			$mythic_pool = array();
-			foreach ($hero_data as $n => $d) if (isset($d['rank']) && $d['rank'] === '신화') $mythic_pool[] = $n;
-			if (empty($mythic_pool)) throw new Exception('신화 영웅 데이터가 없습니다.');
-			$new_name = $mythic_pool[array_rand($mythic_pool)];
+			$new_name = $target_name;
 
 			$chk = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? FOR UPDATE");
 			$chk->execute(array($uid, $new_name));
@@ -1113,19 +1436,29 @@ function handle_combine(PDO $pdo) {
 			$pdo->prepare("INSERT IGNORE INTO tb_collection (uid, hero_name) VALUES (?, ?)")->execute(array($uid, $new_name));
 			$pdo->commit();
 
-			$msg = "✨ 전설 영웅 (" . implode(', ', $names) . ") 4명을 조합하여 <span style='color:#ff5252; font-weight:bold;'>[신화] {$new_name}</span> 획득!";
-			echo json_encode(array('status' => 'success', 'msg' => $msg, 'new_rank' => '신화', 'new_name' => $new_name));
+			$msg = "✨ 조합 성공! (" . implode(' + ', $used_text) . ") → <span style='color:#ff5252; font-weight:bold;'>[신화] {$new_name}</span> 획득!";
+			echo json_encode(array('status' => 'success', 'msg' => $msg, 'new_rank' => '신화', 'new_name' => $new_name, 'html' => $render_view()));
 			return;
 		}
 
 		if ($mode === 'evolve') {
-			if (!array_key_exists($target_name, $evolution_recipes)) throw new Exception('알 수 없는 진화 레시피입니다.');
+			if (!isset($evolution_recipes[$target_name])) throw new Exception('알 수 없는 진화 레시피입니다.');
 			$evolved_name = $evolution_recipes[$target_name];
+			$need_battles = isset($evolution_requirements[$target_name]['battle_count']) ? (int)$evolution_requirements[$target_name]['battle_count'] : 1000;
 			$pdo->beginTransaction();
-			$st = $pdo->prepare("SELECT inv_id, quantity FROM tb_heroes WHERE uid = ? AND hero_name = ? AND quantity > 0 FOR UPDATE");
-			$st->execute(array($uid, $target_name));
-			$src = $st->fetch();
-			if (!$src) throw new Exception("진화에 필요한 영웅({$target_name})이 없습니다.");
+
+			$aliases = $get_aliases($target_name);
+			$ph = implode(',', array_fill(0, count($aliases), '?'));
+			$params = array_merge(array($uid), $aliases);
+			$st = $pdo->prepare("SELECT inv_id, quantity, battle_count FROM tb_heroes WHERE uid = ? AND hero_name IN ({$ph}) AND quantity > 0 AND is_equipped = 0 AND is_on_expedition = 0 ORDER BY battle_count DESC, quantity DESC, inv_id ASC FOR UPDATE");
+			$st->execute($params);
+			$src_rows = $st->fetchAll();
+			if (empty($src_rows)) throw new Exception("진화에 필요한 영웅({$target_name})이 없습니다. (출전/파견 해제 필요)");
+			$src = $src_rows[0];
+			$current_battle = isset($src['battle_count']) ? (int)$src['battle_count'] : 0;
+			if ($current_battle < $need_battles) {
+				throw new Exception("진화 조건 미충족: {$target_name} 전투 {$current_battle}/{$need_battles}");
+			}
 			if ((int)$src['quantity'] > 1) $pdo->prepare("UPDATE tb_heroes SET quantity = quantity - 1 WHERE inv_id = ?")->execute(array($src['inv_id']));
 			else $pdo->prepare("DELETE FROM tb_heroes WHERE inv_id = ?")->execute(array($src['inv_id']));
 
@@ -1142,7 +1475,7 @@ function handle_combine(PDO $pdo) {
 			$pdo->commit();
 
 			$msg = "🔮 <span style='color:#ff5252;'>{$target_name}</span> → <span style='color:#ffeb3b; font-weight:bold;'>[불멸] {$evolved_name}</span> 진화!";
-			echo json_encode(array('status' => 'success', 'msg' => $msg, 'new_rank' => '불멸', 'new_name' => $evolved_name));
+			echo json_encode(array('status' => 'success', 'msg' => $msg, 'new_rank' => '불멸', 'new_name' => $evolved_name, 'html' => $render_view()));
 			return;
 		}
 
@@ -1153,13 +1486,28 @@ function handle_combine(PDO $pdo) {
 	}
 }
 
+function get_hero_levelup_cost($hero_rank, $lv) {
+	$rank_base_cost = array(
+		'일반' => 100,
+		'희귀' => 200,
+		'영웅' => 400,
+		'전설' => 800,
+		'신화' => 1600,
+		'불멸' => 3200,
+		'유일' => 6400
+	);
+	$base = isset($rank_base_cost[$hero_rank]) ? (int)$rank_base_cost[$hero_rank] : 100;
+	$step = max(1, (int)$lv);
+	return (int)($base * pow(2, $step - 1));
+}
+
 function render_hero_levelup_html($heroes) {
 	if (empty($heroes)) return "<div style='color:#777; text-align:center; padding:10px;'>강화할 영웅이 없습니다.</div>";
 	$html = "<div style='display:grid; gap:8px;'>";
 	foreach ($heroes as $h) {
 		$lv = (int)$h['level'];
 		$next_lv = min(15, $lv + 1);
-		$cost = $lv * 120;
+		$cost = get_hero_levelup_cost($h['hero_rank'], $lv);
 		$disabled = ($lv >= 15) ? 'disabled' : '';
 		$btn_text = ($lv >= 15) ? '최대 레벨' : "강화 ({$cost}G)";
 		$color = isset($GLOBALS['colors'][$h['hero_rank']]) ? $GLOBALS['colors'][$h['hero_rank']] : '#fff';
@@ -1203,7 +1551,7 @@ function handle_hero_levelup(PDO $pdo) {
 		$lv = (int)$hero['level'];
 		if ($lv >= 15) throw new Exception('이미 최대 레벨입니다.');
 
-		$cost = $lv * 120;
+		$cost = get_hero_levelup_cost($hero['hero_rank'], $lv);
 		$cmd = $pdo->prepare("SELECT gold FROM tb_commanders WHERE uid = ? FOR UPDATE");
 		$cmd->execute(array($uid));
 		$gold = (int)$cmd->fetchColumn();
@@ -1298,6 +1646,29 @@ function handle_stream_ai(PDO $pdo) {
 	header('Content-Type: text/event-stream; charset=utf-8');
 	header('Cache-Control: no-cache');
 	header('Connection: keep-alive');
+	$text = isset($_SESSION['ai_stream_text']) ? (string)$_SESSION['ai_stream_text'] : '바람이 스쳐 지나갑니다...';
+	unset($_SESSION['ai_stream_text']);
+	$ai = request_ai_text_with_fallback($text, false);
+	$ai_text = is_array($ai) ? (string)$ai['text'] : (string)$ai;
+	$meta = is_array($ai) ? array('provider' => $ai['provider'], 'model' => $ai['model']) : array('provider' => 'raw', 'model' => 'unknown');
+	stream_text_as_sse($ai_text, 28000, $meta);
+	echo "data: [DONE]\n\n";
+	@ob_flush(); @flush();
+	exit;
+}
+
+function handle_stream_combat_ai(PDO $pdo) {
+	app_log('handle_stream_combat_ai.start');
+	if (!isset($_SESSION['uid'])) { http_response_code(400); exit; }
+	header('Content-Type: text/event-stream; charset=utf-8');
+	header('Cache-Control: no-cache');
+	header('Connection: keep-alive');
+	$combat_seed = isset($_SESSION['combat_stream_text']) ? (string)$_SESSION['combat_stream_text'] : '칼날이 어둠을 가르고, 전투의 파편이 흩어진다.';
+	unset($_SESSION['combat_stream_text']);
+	$ai = request_ai_text_with_fallback($combat_seed, false, 'combat');
+	$ai_text = is_array($ai) ? (string)$ai['text'] : (string)$ai;
+	$meta = is_array($ai) ? array('provider' => $ai['provider'], 'model' => $ai['model']) : array('provider' => 'raw', 'model' => 'unknown');
+	stream_text_as_sse($ai_text, 26000, $meta);
 	echo "data: [DONE]\n\n";
 	@ob_flush(); @flush();
 	exit;
@@ -1309,6 +1680,12 @@ function handle_stream_story_ai(PDO $pdo) {
 	header('Content-Type: text/event-stream; charset=utf-8');
 	header('Cache-Control: no-cache');
 	header('Connection: keep-alive');
+	$story_seed = isset($_SESSION['story_stream_text']) ? (string)$_SESSION['story_stream_text'] : "낡은 석판의 문자가 천천히 빛나며, 잊힌 기록이 하나씩 떠오른다...";
+	unset($_SESSION['story_stream_text']);
+	$ai = request_ai_text_with_fallback($story_seed, true);
+	$ai_story = is_array($ai) ? (string)$ai['text'] : (string)$ai;
+	$meta = is_array($ai) ? array('provider' => $ai['provider'], 'model' => $ai['model']) : array('provider' => 'raw', 'model' => 'unknown');
+	stream_text_as_sse($ai_story, 26000, $meta);
 	echo "data: [DONE]\n\n";
 	@ob_flush(); @flush();
 	exit;
@@ -1368,6 +1745,7 @@ switch ($action) {
 	case 'combine': handle_combine($pdo); break;
 	case 'equip': handle_equip($pdo); break;
 	case 'stream_ai': handle_stream_ai($pdo); break;
+	case 'stream_combat_ai': handle_stream_combat_ai($pdo); break;
 	case 'stream_story_ai': handle_stream_story_ai($pdo); break;
 	case 'ranking': handle_ranking($pdo); break;
 	case 'restart': handle_restart($pdo); break;

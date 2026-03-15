@@ -113,12 +113,12 @@ try {
         <h3 style="color: #ccc; font-size: 1rem; border-bottom: 1px solid #333; padding-bottom: 5px; display:flex; justify-content:space-between;">
             <span>📊 사령관 스탯</span> <span style="font-size:0.8rem; color:#ff9800;">POINT: <span id="stat-points"><?= $commander['stat_points'] ?? 0 ?></span></span>
         </h3>
-        <div class="stat-box"><span class="stat-name">힘 (STR)</span> <div><span class="stat-value" id="val-str"><?= $commander['stat_str'] ?></span> <button class="btn-stat-up" data-stat="str">+</button></div></div>
-        <div class="stat-box"><span class="stat-name">마력 (MAG)</span> <div><span class="stat-value" id="val-mag"><?= $commander['stat_mag'] ?></span> <button class="btn-stat-up" data-stat="mag">+</button></div></div>
-        <div class="stat-box"><span class="stat-name">민첩 (AGI)</span> <div><span class="stat-value" id="val-agi"><?= $commander['stat_agi'] ?></span> <button class="btn-stat-up" data-stat="agi">+</button></div></div>
-        <div class="stat-box"><span class="stat-name">행운 (LUK)</span> <div><span class="stat-value" id="val-luk"><?= $commander['stat_luk'] ?></span> <button class="btn-stat-up" data-stat="luk">+</button></div></div>
-        <div class="stat-box"><span class="stat-name">정신력 (MEN)</span> <div><span class="stat-value" id="val-men"><?= $commander['stat_men'] ?></span> <button class="btn-stat-up" data-stat="men">+</button></div></div>
-        <div class="stat-box"><span class="stat-name">체력 (VIT)</span> <div><span class="stat-value" id="val-vit"><?= $commander['stat_vit'] ?></span> <button class="btn-stat-up" data-stat="vit">+</button></div></div>
+        <div class="stat-box" title="STR: 사령관 기본 공격식에 STR*2 적용, 물리 영웅 피해 +2%/10 STR, 함정 파괴 확률 min(35, floor(STR/3))"><span class="stat-name">힘 (STR)</span> <div><span class="stat-value" id="val-str"><?= $commander['stat_str'] ?></span> <button class="btn-stat-up" data-stat="str" title="STR 1 증가">+</button></div></div>
+        <div class="stat-box" title="MAG: 액티브 스킬 피해/회복 증폭, 마법 영웅 피해 +2%/10 MAG, 탐색 시 MP 회복 floor(MAG/10)"><span class="stat-name">마력 (MAG)</span> <div><span class="stat-value" id="val-mag"><?= $commander['stat_mag'] ?></span> <button class="btn-stat-up" data-stat="mag" title="MAG 1 증가">+</button></div></div>
+        <div class="stat-box" title="AGI: 도주 확률 40+AGI, 사령관/영웅 연속 공격 확률 floor(AGI/5)%"><span class="stat-name">민첩 (AGI)</span> <div><span class="stat-value" id="val-agi"><?= $commander['stat_agi'] ?></span> <button class="btn-stat-up" data-stat="agi" title="AGI 1 증가">+</button></div></div>
+        <div class="stat-box" title="LUK: 치명타 확률 floor(LUK/2)%, 치명 배율 1.5+LUK*0.01, 탐험 골드/행운 이벤트 강화, 소환(전설/영웅/희귀) 가중치 보정"><span class="stat-name">행운 (LUK)</span> <div><span class="stat-value" id="val-luk"><?= $commander['stat_luk'] ?></span> <button class="btn-stat-up" data-stat="luk" title="LUK 1 증가">+</button></div></div>
+        <div class="stat-box" title="MEN: 최대 MP +5/포인트, 휴식 추가 회복 +MEN*3, 영웅 피해 배율 1+MEN*0.005, 영웅 스킬 발동 +2%/10 MEN"><span class="stat-name">정신력 (MEN)</span> <div><span class="stat-value" id="val-men"><?= $commander['stat_men'] ?></span> <button class="btn-stat-up" data-stat="men" title="MEN 1 증가">+</button></div></div>
+        <div class="stat-box" title="VIT: 최대 HP +20/포인트, 피해 감소 floor(VIT/2), 반격 방어 floor(VIT/5)%, 영웅 보호막 floor(VIT/10)% (최대 40%)"><span class="stat-name">체력 (VIT)</span> <div><span class="stat-value" id="val-vit"><?= $commander['stat_vit'] ?></span> <button class="btn-stat-up" data-stat="vit" title="VIT 1 증가">+</button></div></div>
         <div class="stat-box"><span class="stat-name">성향</span> <span class="stat-value"><?= $commander['disposition'] ?> (<?php 
             $disp = $commander['disposition'];
             if ($disp <= 20) echo '극도로 조심'; 
@@ -132,6 +132,7 @@ try {
             <div class="btn" onclick="openBookModal()" style="padding: 10px; font-size: 0.9rem;">영웅 도감 📜</div>
             <div class="btn" onclick="openHeroLevelupModal()" style="padding: 10px; font-size: 0.9rem; background:#3f51b5;">영웅 제단 ⛩️</div>
             <div class="btn" onclick="openRelicModal()" style="padding: 10px; font-size: 0.9rem; background:#6d4c41;">유물 제련 🗿</div>
+            <div class="btn" onclick="document.getElementById('stat-help-modal').style.display='flex'" style="padding: 10px; font-size: 0.9rem; background:#455a64; grid-column: span 2;">스탯 공식 도움말 📘</div>
         </div>
 
         <div id="auto-explore-section" style="margin-top: 20px; background: #222; padding: 15px; border-radius: 5px;">
@@ -243,6 +244,22 @@ try {
             <button onclick="document.getElementById('book-modal').style.display='none'" style="float:right; background:#d32f2f; color:white; border:none; padding:5px 10px; cursor:pointer;">닫기 ✖</button>
             <h2 style="margin-top:0;">📜 영웅 도감 & 컬렉션</h2>
             <div id="book-list-area">불러오는 중...</div>
+        </div>
+    </div>
+
+    <!-- 스탯 공식 도움말 모달 -->
+    <div id="stat-help-modal" class="modal-overlay">
+        <div class="modal-content" style="border-color:#90a4ae;">
+            <button onclick="document.getElementById('stat-help-modal').style.display='none'" style="float:right; background:#d32f2f; color:white; border:none; padding:5px 10px; cursor:pointer;">닫기 ✖</button>
+            <h2 style="margin-top:0; color:#90caf9;">📘 스탯 공식 도움말</h2>
+            <div style="line-height:1.7; font-size:0.95rem;">
+                <div style="margin-bottom:10px;"><b>🛡️ VIT</b><br>최대 HP +20/포인트, 전투/함정 피해 감소 floor(VIT/2), 반격 방어 확률 floor(VIT/5)%, 영웅 보호막 확률 floor(VIT/10)% (최대 40%).</div>
+                <div style="margin-bottom:10px;"><b>🧠 MEN</b><br>최대 MP +5/포인트, 휴식 추가 회복 +MEN*3, 영웅 피해 배율 1 + MEN*0.005, 영웅 스킬 발동 확률 +2%/10 MEN.</div>
+                <div style="margin-bottom:10px;"><b>🍀 LUK</b><br>치명타 확률 floor(LUK/2)%, 치명 배율 1.5 + LUK*0.01, 탐험 골드 획득량 (1 + LUK*0.01)배, 함정 행운 발동 확률 min(40, floor(LUK/2))%.<br>소환은 신화가 제외되며, LUK는 전설(+0.03%/35), 영웅(+0.10%/20), 희귀(+0.20%/15) 가중치 보정에만 적용됩니다.</div>
+                <div style="margin-bottom:10px;"><b>🗡️ STR</b><br>사령관 기본 공격력 증가(기본식에 STR*2), 물리 영웅 피해 +2%/10 STR, 함정 파괴 확률 min(35, floor(STR/3))%.</div>
+                <div style="margin-bottom:10px;"><b>🔮 MAG</b><br>액티브 스킬 피해/회복이 MAG 비례 증폭, 마법 영웅 피해 +2%/10 MAG, 탐색 시 MP 자연회복 floor(MAG/10).</div>
+                <div><b>💨 AGI</b><br>도주 확률 40 + AGI, 사령관/영웅 연속 공격 확률 floor(AGI/5)%.</div>
+            </div>
         </div>
     </div>
 

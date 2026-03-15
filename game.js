@@ -86,6 +86,15 @@ function addLog(message, isSystem = false) {
     logBox.scrollTop = logBox.scrollHeight;
 }
 
+function formatAiBadge(meta) {
+    if (!meta || !meta.provider) return '[AI ✨]';
+    const provider = String(meta.provider).toLowerCase();
+    const model = meta.model ? ` ${meta.model}` : '';
+    if (provider === 'ollama') return `[Ollama${model} ✨]`;
+    if (provider === 'gemini') return `[Gemini${model} ✨]`;
+    return `[AI${model} ✨]`;
+}
+
 function setBattleStage(stage, mobName = '', mobMaxHp = 0) {
     window.battleStage = stage;
     localStorage.setItem('ld_battle_stage', stage);
@@ -245,12 +254,12 @@ async function doCombatTurn() {
                     const logBox = document.getElementById('game-log');
                     const streamLog = document.createElement('div');
                     streamLog.className = 'log-entry system';
-                    streamLog.innerHTML = "<span style='color:#ff5252; font-weight:bold;'>[전투 상황 ✨]</span><br><span class='stream-text'></span>";
+                    streamLog.innerHTML = "<span style='color:#ff5252; font-weight:bold;'>[전투 스크립트 ✨]</span><br><span class='stream-text'></span>";
                     logBox.appendChild(streamLog);
                     logBox.scrollTop = logBox.scrollHeight;
                     const textSpan = streamLog.querySelector('.stream-text');
 
-                    const source = new EventSource('api.php?action=stream_ai');
+                    const source = new EventSource('api.php?action=stream_combat_ai');
                     source.onmessage = function(event) {
                         if (event.data === '[DONE]') {
                             source.close();
@@ -334,10 +343,11 @@ async function sendAction(actionType) {
 
                         const streamLog = document.createElement('div');
                         streamLog.className = 'log-entry system';
-                        streamLog.innerHTML = "<span style='color:#00d8ff; font-weight:bold;'>[Gemini 1.5 Flash ✨]</span><br><span class='stream-text'></span>";
+                        streamLog.innerHTML = "<span class='stream-badge' style='color:#00d8ff; font-weight:bold;'>[AI ✨]</span><br><span class='stream-text'></span>";
                         logBox.appendChild(streamLog);
                         logBox.scrollTop = logBox.scrollHeight;
                         const textSpan = streamLog.querySelector('.stream-text');
+                        const badgeSpan = streamLog.querySelector('.stream-badge');
 
                         const source = new EventSource('api.php?action=stream_ai');
                         source.onmessage = function(event) {
@@ -348,6 +358,9 @@ async function sendAction(actionType) {
                                 return;
                             }
                             const chunk = JSON.parse(event.data);
+                            if (chunk.meta && badgeSpan) {
+                                badgeSpan.innerText = formatAiBadge(chunk.meta);
+                            }
                             if (chunk.text) textSpan.innerHTML += chunk.text;
                             if (chunk.log_append) streamLog.innerHTML += "<br>" + chunk.log_append;
                             logBox.scrollTop = logBox.scrollHeight;
@@ -539,6 +552,7 @@ function showStoryModal(storyData) {
 
     const source = new EventSource('api.php?action=stream_story_ai');
     let isFirstChunk = true;
+    let aiProviderBadge = '';
     source.onmessage = function(event) {
         if (event.data === '[DONE]') {
             source.close();
@@ -546,6 +560,10 @@ function showStoryModal(storyData) {
         }
         if (isFirstChunk) { contentDiv.innerHTML = ''; isFirstChunk = false; }
         const chunk = JSON.parse(event.data);
+        if (chunk.meta) {
+            aiProviderBadge = `<div style="color:#90caf9; margin-bottom:8px; font-size:0.9rem;">${formatAiBadge(chunk.meta)}</div>`;
+            contentDiv.innerHTML = aiProviderBadge;
+        }
         if (chunk.text) contentDiv.innerHTML += chunk.text;
     };
     source.onerror = function() {
