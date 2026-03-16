@@ -29,7 +29,7 @@ set_error_handler(function($severity, $message, $file, $line) {
 	return true;
 });
 
-$GLOBALS['colors'] = array('일반'=>'#aaa', '희귀'=>'#4caf50', '영웅'=>'#2196f3', '전설'=>'#9c27b0', '신화'=>'#ff5252', '불멸'=>'#ffeb3b', '유일'=>'#00e5ff');
+$GLOBALS['colors'] = array('일반'=>'#ffffff', '희귀'=>'#2196f3', '영웅'=>'#9c27b0', '전설'=>'#ffeb3b', '신화'=>'#ff9800', '불멸'=>'#ff5252', '유일'=>'#00e5ff');
 
 function http_post_json($url, $payload, $timeout_sec = 10) {
 	$ch = curl_init($url);
@@ -911,7 +911,7 @@ function handle_next_floor(PDO $pdo) {
 	$uid = get_uid_or_fail();
 	try {
 		$pdo->beginTransaction();
-		$st = $pdo->prepare("SELECT current_floor, max_floor, hp, max_hp, mp, max_mp, is_combat FROM tb_commanders WHERE uid = ? FOR UPDATE");
+		$st = $pdo->prepare("SELECT * FROM tb_commanders WHERE uid = ? FOR UPDATE");
 		$st->execute(array($uid));
 		$cmd = $st->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
@@ -922,6 +922,53 @@ function handle_next_floor(PDO $pdo) {
 		$new_max_floor = max((int)$cmd['max_floor'], $new_floor);
 		$mp_regen = max(0, (int)floor(((int)$cmd['max_mp']) * 0.02));
 		$new_mp = min((int)$cmd['max_mp'], (int)$cmd['mp'] + $mp_regen);
+
+		if ($new_floor % 10 === 0) {
+			$diff = pow(2, floor(($new_floor - 1) / 10));
+			$balance = get_floor_balance_profile($new_floor);
+			$atk_scale = (float)$balance['atk_scale'];
+			$hp_scale = (float)$balance['hp_scale'];
+			$bosses = array('거대 고기 슬라임', '폭주 로봇', '심연의 뱀파이어', '파괴자 나하투', '고대 드래곤', '리치 왕');
+			$mob_name = '[보스] ' . $bosses[array_rand($bosses)];
+			$base_mob_hp = (40 + rand(0, 20)) * $diff * 10 * $hp_scale;
+			$mob_atk = max(1, (int)round(((8 + rand(0, 5)) * $diff) * $atk_scale));
+
+			$expected_turn_damage = estimate_expected_turn_damage($pdo, $uid, $cmd);
+			$target_turns = (int)$balance['boss_turns'];
+			$var_min = (int)$balance['var_min'];
+			$var_max = (int)$balance['var_max'];
+			if ($var_min > $var_max) {
+				$tmp = $var_min;
+				$var_min = $var_max;
+				$var_max = $tmp;
+			}
+			$variance = rand($var_min, $var_max) / 100.0;
+			$floor_reference_turn_damage = max(10, (int)round($base_mob_hp / max(1, $target_turns)));
+			$effective_turn_damage = apply_adaptive_hp_diminishing($expected_turn_damage, $floor_reference_turn_damage, true);
+			$adaptive_hp = (int)round((($effective_turn_damage * $target_turns) + ($base_mob_hp * 0.12)) * $variance);
+			$min_hp = max(300, (int)floor($base_mob_hp * 0.30));
+			$mob_max_hp = max($min_hp, $adaptive_hp);
+
+			$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, mp = ?, is_combat = 1, mob_name = ?, mob_hp = ?, mob_max_hp = ?, mob_atk = ? WHERE uid = ?")
+				->execute(array($new_floor, $new_max_floor, $new_mp, $mob_name, $mob_max_hp, $mob_max_hp, $mob_atk, $uid));
+
+			$log = "⬆️ 다음 층으로 이동했습니다. <b>{$new_floor}층</b> 도달과 동시에 <b>{$mob_name}</b> 출현!";
+			$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
+			$pdo->commit();
+
+			echo json_encode(array(
+				'status' => 'encounter',
+				'msg' => $log,
+				'new_floor' => $new_floor,
+				'new_hp' => (int)$cmd['hp'],
+				'max_hp' => (int)$cmd['max_hp'],
+				'new_mp' => $new_mp,
+				'max_mp' => (int)$cmd['max_mp'],
+				'mob_name' => $mob_name,
+				'mob_max_hp' => $mob_max_hp
+			));
+			return;
+		}
 
 		$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, mp = ? WHERE uid = ?")
 			->execute(array($new_floor, $new_max_floor, $new_mp, $uid));

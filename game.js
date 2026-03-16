@@ -923,7 +923,7 @@ async function sendAction(actionType) {
                     addLog(data.msg, true);
                  }
             } else if (actionType === 'next_floor') {
-                if (data.status === 'success') {
+                if (data.status === 'success' || data.status === 'encounter') {
                     if (data.new_floor !== undefined) {
                         document.getElementById('floor-display').innerText = data.new_floor;
                     }
@@ -931,6 +931,11 @@ async function sendAction(actionType) {
                         updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
                     }
                     if (data.msg) addLog(data.msg, true);
+                    if (data.status === 'encounter') {
+                        const nextMobMaxHp = Math.max(1, Number(data.mob_max_hp || window.currentMobMaxHp || 1));
+                        addLog(`⚠️ 전투 대상 확인: <b>[${data.mob_name}]</b> (HP ${nextMobMaxHp})`, true);
+                        enterEncounterState(data.mob_name || '정체불명의 적', nextMobMaxHp);
+                    }
                     shouldRescheduleAutomation = hasAutomationEnabled();
                 } else {
                     addLog(data.msg, true);

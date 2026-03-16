@@ -18,11 +18,10 @@ $error_msg = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $class_type = $_POST['class_type'] ?? '';
     $background_story = $_POST['background_story'] ?? ''; // 배경 이야기 수집
-    $narrative_tone = $_POST['narrative_tone'] ?? '';
-    $valid_tones = array('다크 판타지 톤', '하이텐션 액션 톤', '간결 로그 톤');
+    $narrative_tone = '다크 판타지 톤';
 
     // 정상적인 클래스가 넘어왔는지 해킹 방지 검증
-    if (in_array($class_type, array('돌격', '신비', '전술'), true) && in_array($narrative_tone, $valid_tones, true)) {
+    if (in_array($class_type, array('돌격', '신비', '전술'), true)) {
         
         // [TRPG 다이스 굴림 핵심 로직] 기본 1~20 주사위
         $str = rand(1, 20); // 힘
@@ -75,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     } else {
-        $error_msg = "올바른 사령관 특성과 내레이션 톤을 선택해주세요.";
+        $error_msg = "올바른 사령관 특성을 선택해주세요.";
     }
 }
 ?>
@@ -138,31 +137,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <p class="class-desc">함정 회피와 운에 기대는 변수 창출의 대가입니다. 민첩(AGI)과 행운(LUK)에 보너스를 받습니다.</p>
             </div>
         </label>
-
-        <div style="margin-bottom: 15px;">
-            <label style="display:block; margin-bottom:8px; color:#ccc;">생성 내레이션 톤 선택</label>
-            <label class="class-card" style="display:block; margin-bottom:8px;">
-                <input type="radio" name="narrative_tone" value="다크 판타지 톤" required checked>
-                <div>
-                    <h3 class="class-title">🌑 다크 판타지 톤</h3>
-                    <p class="class-desc">암울하고 신비로운 분위기의 서사를 출력합니다.</p>
-                </div>
-            </label>
-            <label class="class-card" style="display:block; margin-bottom:8px;">
-                <input type="radio" name="narrative_tone" value="하이텐션 액션 톤" required>
-                <div>
-                    <h3 class="class-title">🔥 하이텐션 액션 톤</h3>
-                    <p class="class-desc">속도감 있고 강렬한 액션 중심 문장으로 출력합니다.</p>
-                </div>
-            </label>
-            <label class="class-card" style="display:block; margin-bottom:8px;">
-                <input type="radio" name="narrative_tone" value="간결 로그 톤" required>
-                <div>
-                    <h3 class="class-title">📜 간결 로그 톤</h3>
-                    <p class="class-desc">짧고 명확한 기록형 문장으로 출력합니다.</p>
-                </div>
-            </label>
-        </div>
 
 		<div style="margin-bottom: 15px;">
 			<label for="background_story" style="display:block; margin-bottom:5px; color: #ccc;">캐릭터 탄생 설화 (AI 생성 등)</label>
