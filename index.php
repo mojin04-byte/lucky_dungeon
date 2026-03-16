@@ -100,7 +100,7 @@ if ($commander_stat_max > $commander_stat_min) {
         .bar-bg { background: #333; border-radius: 4px; width: 100%; height: 16px; margin-bottom: 15px; overflow: hidden; }
         .hp-bar { background: #4caf50; height: 100%; width: <?= ($commander['hp'] / $commander['max_hp']) * 100 ?>%; transition: width 0.3s; }
         .mp-bar { background: #2196f3; height: 100%; width: <?= ($commander['mp'] / $commander['max_mp']) * 100 ?>%; transition: width 0.3s; }
-        .mob-hp-bar { background: #ff5252; height: 100%; width: 100%; transition: width 0.3s; }
+        .mob-hp-bar { background: #ff5252; height: 100%; width: 100%; transition: width 0.12s ease-out; }
         .log-container { flex-grow: 1; padding: 15px; overflow-y: auto; font-size: 1.05rem; line-height: 1.6; }
         .log-entry { margin-bottom: 12px; padding: 12px; background: #1a1a1a; border-left: 4px solid #4caf50; border-radius: 4px; animation: fadeIn 0.3s; }
         .log-entry.system { border-left-color: #ffa500; color: #ffeb3b; }

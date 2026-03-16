@@ -3,6 +3,7 @@ let isAutoMode = false;
 let combatTimer = null;
 let isProcessingTurn = false;
 let autoExploreTimer = null;
+const MONSTER_HP_STEP_DELAY = 150;
 
 const BATTLE_STAGE = {
     EXPLORE: 'explore',
@@ -236,8 +237,9 @@ async function renderTurnScriptBlock(targetEl, data, options = {}) {
         if (options.syncMonsterHp) {
             currentMobHp = Math.max(finalMobHp, currentMobHp - Math.max(0, Number(step.damage) || 0));
             updateMonsterBars(currentMobHp, mobMaxHp);
+            await wait(MONSTER_HP_STEP_DELAY);
         }
-        await wait(23);
+        await wait(options.syncMonsterHp ? 16 : 23);
     }
 
     for (const line of statusLines) {
@@ -279,8 +281,9 @@ async function addTurnDamageBreakdown(data, options = {}) {
         if (options.syncMonsterHp) {
             currentMobHp = Math.max(finalMobHp, currentMobHp - Math.max(0, Number(step.damage) || 0));
             updateMonsterBars(currentMobHp, mobMaxHp);
+            await wait(MONSTER_HP_STEP_DELAY);
         }
-        await wait(20);
+        await wait(options.syncMonsterHp ? 16 : 20);
     }
 
     for (const line of statusLines) {
@@ -339,9 +342,7 @@ function setBattleStage(stage, mobName = '', mobMaxHp = 0) {
         show('encounter-actions', false);
         show('combat-actions', false);
         show('monster-ui', false);
-        if (document.getElementById('btn-start-auto-explore').style.display !== 'none') {
-            show('explore-actions', true);
-        }
+        show('explore-actions', true);
         return;
     }
 
