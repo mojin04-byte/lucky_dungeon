@@ -532,9 +532,9 @@ function generate_hero_lists($heroes) {
 			} else {
 				$card .= "<div style='display:flex; gap:6px;'>";
 				$card .= "<button class='btn' title='출전 덱에 추가' style='padding:5px 10px; font-size:0.8rem;' onclick='toggleEquip({$h['inv_id']}, 1)'>출전</button>";
-				if ($h['hero_rank'] === '일반' && (int)$h['quantity'] >= 3) {
+				if (in_array($h['hero_rank'], array('일반', '희귀'), true) && (int)$h['quantity'] >= 3) {
 					$hero_name_js = json_encode($h['hero_name']);
-					$card .= "<button class='btn' title='동일 일반 영웅 3기를 합성' style='padding:5px 10px; font-size:0.8rem; background:#2f7d32;' onclick='synthesizeHero({$hero_name_js})'>합성</button>";
+					$card .= "<button class='btn' title='동일 영웅 3기를 상위 등급으로 합성' style='padding:5px 10px; font-size:0.8rem; background:#2f7d32;' onclick='synthesizeHero({$hero_name_js})'>합성</button>";
 				}
 				$card .= "</div></div>";
 			}
@@ -698,6 +698,26 @@ function normalize_event_title_for_context($event_type, $title) {
 	return $clean;
 }
 
+function get_floor_balance_profile($floor) {
+	$safe_floor = max(1, (int)$floor);
+	$profiles = array(
+		array('max_floor' => 20, 'atk_scale' => 1.00, 'hp_scale' => 1.00, 'normal_turns' => 5, 'boss_turns' => 9, 'var_min' => 90, 'var_max' => 110),
+		array('max_floor' => 40, 'atk_scale' => 0.95, 'hp_scale' => 1.02, 'normal_turns' => 5, 'boss_turns' => 9, 'var_min' => 90, 'var_max' => 110),
+		array('max_floor' => 60, 'atk_scale' => 0.90, 'hp_scale' => 1.05, 'normal_turns' => 6, 'boss_turns' => 10, 'var_min' => 90, 'var_max' => 110),
+		array('max_floor' => 80, 'atk_scale' => 0.86, 'hp_scale' => 1.08, 'normal_turns' => 6, 'boss_turns' => 10, 'var_min' => 91, 'var_max' => 109),
+		array('max_floor' => 120, 'atk_scale' => 0.82, 'hp_scale' => 1.12, 'normal_turns' => 6, 'boss_turns' => 11, 'var_min' => 92, 'var_max' => 108),
+		array('max_floor' => 9999, 'atk_scale' => 0.78, 'hp_scale' => 1.16, 'normal_turns' => 7, 'boss_turns' => 11, 'var_min' => 93, 'var_max' => 107)
+	);
+
+	foreach ($profiles as $profile) {
+		if ($safe_floor <= (int)$profile['max_floor']) {
+			return $profile;
+		}
+	}
+
+	return $profiles[count($profiles) - 1];
+}
+
 function handle_action(PDO $pdo) {
 	app_log('handle_action.start');
 	$uid = get_uid_or_fail();
@@ -759,21 +779,31 @@ function handle_action(PDO $pdo) {
 			// 전투 조우
 			$diff = pow(2, floor(($new_floor - 1) / 10));
 			$is_boss = ($new_floor % 10 === 0);
+			$balance = get_floor_balance_profile($new_floor);
+			$atk_scale = (float)$balance['atk_scale'];
+			$hp_scale = (float)$balance['hp_scale'];
 			if ($is_boss) {
 				$bosses = array('거대 고기 슬라임', '폭주 로봇', '심연의 뱀파이어', '파괴자 나하투', '고대 드래곤', '리치 왕');
 				$mob_name = '[보스] ' . $bosses[array_rand($bosses)];
-				$base_mob_hp = (40 + rand(0, 20)) * $diff * 10;
-				$mob_atk = (8 + rand(0, 5)) * $diff;
+				$base_mob_hp = (40 + rand(0, 20)) * $diff * 10 * $hp_scale;
+				$mob_atk = max(1, (int)round(((8 + rand(0, 5)) * $diff) * $atk_scale));
 			} else {
 				$mobs = array('고블린', '스켈레톤', '오크', '슬라임', '늑대인간', '동굴거미', '미믹', '광신도');
 				$mob_name = (($new_floor > 50) ? '타락한 ' : '굶주린 ') . $mobs[array_rand($mobs)];
-				$base_mob_hp = (40 + rand(0, 20)) * $diff;
-				$mob_atk = (8 + rand(0, 5)) * $diff;
+				$base_mob_hp = (40 + rand(0, 20)) * $diff * $hp_scale;
+				$mob_atk = max(1, (int)round(((8 + rand(0, 5)) * $diff) * $atk_scale));
 			}
 
 			$expected_turn_damage = estimate_expected_turn_damage($pdo, $uid, $cmd);
-			$target_turns = $is_boss ? 9 : 5;
-			$variance = rand(85, 115) / 100.0;
+			$target_turns = $is_boss ? (int)$balance['boss_turns'] : (int)$balance['normal_turns'];
+			$var_min = (int)$balance['var_min'];
+			$var_max = (int)$balance['var_max'];
+			if ($var_min > $var_max) {
+				$tmp = $var_min;
+				$var_min = $var_max;
+				$var_max = $tmp;
+			}
+			$variance = rand($var_min, $var_max) / 100.0;
 			$adaptive_hp = (int)round((($expected_turn_damage * $target_turns) + ($base_mob_hp * ($is_boss ? 0.12 : 0.08))) * $variance);
 			$min_hp = $is_boss ? max(300, (int)floor($base_mob_hp * 0.30)) : max(60, (int)floor($base_mob_hp * 0.25));
 			$mob_max_hp = max($min_hp, $adaptive_hp);
@@ -1641,8 +1671,12 @@ function handle_synthesize(PDO $pdo) {
 		$st->execute(array($uid, $hero_name));
 		$source = $st->fetch();
 		if (!$source || (int)$source['quantity'] < 3) throw new Exception('합성에 필요한 영웅 수량(3)이 부족합니다.');
-		if ($source['hero_rank'] !== '일반') throw new Exception('합성은 일반 영웅만 가능합니다.');
-		$next_rank = '희귀';
+		$rank_up_map = array(
+			'일반' => '희귀',
+			'희귀' => '영웅'
+		);
+		if (!isset($rank_up_map[$source['hero_rank']])) throw new Exception('합성은 일반/희귀 영웅만 가능합니다.');
+		$next_rank = $rank_up_map[$source['hero_rank']];
 
 		$remain = (int)$source['quantity'] - 3;
 		if ($remain > 0) $pdo->prepare("UPDATE tb_heroes SET quantity = ? WHERE inv_id = ?")->execute(array($remain, $source['inv_id']));
@@ -1800,14 +1834,30 @@ function handle_equip(PDO $pdo) {
 				if ((int)$cnt->fetchColumn() >= 5) throw new Exception('출전 덱은 최대 5명까지 가능합니다.');
 
 				if ((int)$hero['quantity'] > 1) {
+					$stack = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? AND is_equipped = 1 AND is_on_expedition = 0 AND inv_id != ? LIMIT 1 FOR UPDATE");
+					$stack->execute(array($uid, $hero['hero_name'], $inv_id));
+					$existing = $stack->fetch();
+
 					$pdo->prepare("UPDATE tb_heroes SET quantity = quantity - 1 WHERE inv_id = ?")->execute(array($inv_id));
-					$lore = isset($hero['hero_lore']) ? $hero['hero_lore'] : '';
-					$battle_count = isset($hero['battle_count']) ? (int)$hero['battle_count'] : 0;
-					$level = isset($hero['level']) ? (int)$hero['level'] : 1;
-					$pdo->prepare("INSERT INTO tb_heroes (uid, hero_rank, hero_name, quantity, battle_count, is_equipped, is_on_expedition, level, hero_lore) VALUES (?, ?, ?, 1, ?, 1, 0, ?, ?)")
-						->execute(array($uid, $hero['hero_rank'], $hero['hero_name'], $battle_count, $level, $lore));
+					if ($existing) {
+						$pdo->prepare("UPDATE tb_heroes SET quantity = quantity + 1 WHERE inv_id = ?")->execute(array($existing['inv_id']));
+					} else {
+						$lore = isset($hero['hero_lore']) ? $hero['hero_lore'] : '';
+						$battle_count = isset($hero['battle_count']) ? (int)$hero['battle_count'] : 0;
+						$level = isset($hero['level']) ? (int)$hero['level'] : 1;
+						$pdo->prepare("INSERT INTO tb_heroes (uid, hero_rank, hero_name, quantity, battle_count, is_equipped, is_on_expedition, level, hero_lore) VALUES (?, ?, ?, 1, ?, 1, 0, ?, ?)")
+							->execute(array($uid, $hero['hero_rank'], $hero['hero_name'], $battle_count, $level, $lore));
+					}
 				} else {
-					$pdo->prepare("UPDATE tb_heroes SET is_equipped = 1 WHERE inv_id = ?")->execute(array($inv_id));
+					$stack = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? AND is_equipped = 1 AND is_on_expedition = 0 AND inv_id != ? LIMIT 1 FOR UPDATE");
+					$stack->execute(array($uid, $hero['hero_name'], $inv_id));
+					$existing = $stack->fetch();
+					if ($existing) {
+						$pdo->prepare("UPDATE tb_heroes SET quantity = quantity + 1 WHERE inv_id = ?")->execute(array($existing['inv_id']));
+						$pdo->prepare("DELETE FROM tb_heroes WHERE inv_id = ?")->execute(array($inv_id));
+					} else {
+						$pdo->prepare("UPDATE tb_heroes SET is_equipped = 1 WHERE inv_id = ?")->execute(array($inv_id));
+					}
 				}
 			} elseif ($action_val === -1) {
 				if ((int)$hero['is_equipped'] === 0) throw new Exception('출전 중인 영웅이 아닙니다.');
