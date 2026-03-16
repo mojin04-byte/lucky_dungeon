@@ -53,6 +53,41 @@ function updateStatUI(points) {
     document.getElementById('stat-points').innerText = points;
     const buttons = document.querySelectorAll('.btn-stat-up');
     buttons.forEach(btn => btn.style.display = (points > 0) ? 'inline-block' : 'none');
+    refreshCommanderStatHighlights();
+}
+
+function refreshCommanderStatHighlights() {
+    const statEls = Array.from(document.querySelectorAll('.stat-value[data-commander-stat]'));
+    if (statEls.length === 0) return;
+
+    const values = statEls
+        .map((el) => Number(el.innerText || 0))
+        .filter((value) => Number.isFinite(value));
+    if (values.length === 0) return;
+
+    const maxValue = Math.max(...values);
+    const minValue = Math.min(...values);
+    statEls.forEach((el) => el.classList.remove('stat-highest', 'stat-lowest'));
+    if (maxValue === minValue) return;
+
+    statEls.forEach((el) => {
+        const value = Number(el.innerText || 0);
+        if (value === maxValue) el.classList.add('stat-highest');
+        if (value === minValue) el.classList.add('stat-lowest');
+    });
+}
+
+function updateMonsterBars(hp, maxHp = window.currentMobMaxHp || 1) {
+    const safeMaxHp = Math.max(1, Number(maxHp) || 1);
+    const safeHp = Math.max(0, Math.min(Number(hp) || 0, safeMaxHp));
+
+    window.currentMobHp = safeHp;
+    window.currentMobMaxHp = safeMaxHp;
+
+    const hpText = document.getElementById('mob-hp-text');
+    const hpBar = document.getElementById('mob-hp-bar');
+    if (hpText) hpText.innerText = `${safeHp}/${safeMaxHp}`;
+    if (hpBar) hpBar.style.width = (safeHp / safeMaxHp * 100) + '%';
 }
 
 function updatePlayerBars(hp, max_hp, mp, max_mp) {
@@ -130,23 +165,27 @@ function addLog(message, isSystem = false) {
     logBox.scrollTop = logBox.scrollHeight;
 }
 
-function getTurnDamageLines(data) {
-    const lines = [];
+function getTurnDamageSteps(data) {
+    const steps = [];
     const details = (data && Array.isArray(data.turn_damage_details)) ? data.turn_damage_details : [];
     if (details.length > 0) {
         for (const item of details) {
             const name = String((item && item.name) || '영웅');
             const dmg = Number((item && item.damage) || 0);
-            lines.push(`${name}의 공격이 ${dmg}의 데미지를 입혔습니다.`);
+            steps.push({ text: `${name}의 공격이 ${dmg}의 데미지를 입혔습니다.`, damage: dmg });
         }
-        return lines;
+        return steps;
     }
 
     const p = Number((data && data.player_dmg) || 0);
     const h = Number((data && data.hero_dmg) || 0);
-    lines.push(`사령관의 공격이 ${p}의 데미지를 입혔습니다.`);
-    if (h > 0) lines.push(`영웅들의 공격이 ${h}의 데미지를 입혔습니다.`);
-    return lines;
+    steps.push({ text: `사령관의 공격이 ${p}의 데미지를 입혔습니다.`, damage: p });
+    if (h > 0) steps.push({ text: `영웅들의 공격이 ${h}의 데미지를 입혔습니다.`, damage: h });
+    return steps;
+}
+
+function getTurnDamageLines(data) {
+    return getTurnDamageSteps(data).map((step) => step.text);
 }
 
 function toPlainLogText(message) {
@@ -172,25 +211,44 @@ function getStatusEffectLines(data) {
         .filter((line) => line.trim() !== '');
 }
 
-async function renderTurnScriptBlock(targetEl, data) {
+async function renderTurnScriptBlock(targetEl, data, options = {}) {
     if (!targetEl) return;
-    const damageLines = getTurnDamageLines(data);
+    const damageSteps = getTurnDamageSteps(data);
     const statusLines = getStatusEffectLines(data);
-    const allLines = damageLines.concat(statusLines);
-    if (allLines.length === 0) return;
+    if (damageSteps.length === 0 && statusLines.length === 0) return;
 
     const textEl = targetEl.querySelector('.turn-script-lines') || targetEl.querySelector('.stream-text');
     if (!textEl) return;
     textEl.textContent = '';
     textEl.style.whiteSpace = 'pre-wrap';
 
-    for (const line of allLines) {
+    let currentMobHp = Number((options.initialMobHp !== undefined) ? options.initialMobHp : (window.currentMobHp || 0));
+    const finalMobHp = Math.max(0, Number((options.finalMobHp !== undefined) ? options.finalMobHp : ((data && data.mob_hp) || currentMobHp)));
+    const mobMaxHp = Math.max(1, Number((options.mobMaxHp !== undefined) ? options.mobMaxHp : ((data && data.mob_max_hp) || window.currentMobMaxHp || 1)));
+
+    if (options.syncMonsterHp) updateMonsterBars(currentMobHp, mobMaxHp);
+
+    for (const step of damageSteps) {
+        await typeText(textEl, toPlainLogText(step.text));
+        textEl.textContent += '\n';
+        const logBox = document.getElementById('game-log');
+        if (logBox) logBox.scrollTop = logBox.scrollHeight;
+        if (options.syncMonsterHp) {
+            currentMobHp = Math.max(finalMobHp, currentMobHp - Math.max(0, Number(step.damage) || 0));
+            updateMonsterBars(currentMobHp, mobMaxHp);
+        }
+        await wait(23);
+    }
+
+    for (const line of statusLines) {
         await typeText(textEl, toPlainLogText(line));
         textEl.textContent += '\n';
         const logBox = document.getElementById('game-log');
         if (logBox) logBox.scrollTop = logBox.scrollHeight;
         await wait(23);
     }
+
+    if (options.syncMonsterHp) updateMonsterBars(finalMobHp, mobMaxHp);
 }
 
 async function addTypedLogLine(message, isSystem = true) {
@@ -206,13 +264,31 @@ async function addTypedLogLine(message, isSystem = true) {
     await typeText(newLog, plain);
 }
 
-async function addTurnDamageBreakdown(data) {
-    const damageLines = getTurnDamageLines(data);
+async function addTurnDamageBreakdown(data, options = {}) {
+    const damageSteps = getTurnDamageSteps(data);
     const statusLines = getStatusEffectLines(data);
-    for (const line of damageLines.concat(statusLines)) {
+
+    let currentMobHp = Number((options.initialMobHp !== undefined) ? options.initialMobHp : (window.currentMobHp || 0));
+    const finalMobHp = Math.max(0, Number((options.finalMobHp !== undefined) ? options.finalMobHp : ((data && data.mob_hp) || currentMobHp)));
+    const mobMaxHp = Math.max(1, Number((options.mobMaxHp !== undefined) ? options.mobMaxHp : ((data && data.mob_max_hp) || window.currentMobMaxHp || 1)));
+
+    if (options.syncMonsterHp) updateMonsterBars(currentMobHp, mobMaxHp);
+
+    for (const step of damageSteps) {
+        await addTypedLogLine(step.text, true);
+        if (options.syncMonsterHp) {
+            currentMobHp = Math.max(finalMobHp, currentMobHp - Math.max(0, Number(step.damage) || 0));
+            updateMonsterBars(currentMobHp, mobMaxHp);
+        }
+        await wait(20);
+    }
+
+    for (const line of statusLines) {
         await addTypedLogLine(line, true);
         await wait(20);
     }
+
+    if (options.syncMonsterHp) updateMonsterBars(finalMobHp, mobMaxHp);
 }
 
 function formatAiBadge(meta) {
@@ -391,10 +467,10 @@ async function doCombatTurn() {
             isProcessingTurn = false;
         } else {
             updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
-            window.currentMobHp = Number(data.mob_hp || 0);
-            window.currentMobMaxHp = Number(data.mob_max_hp || window.currentMobMaxHp || 1);
-            document.getElementById('mob-hp-text').innerText = `${data.mob_hp}/${data.mob_max_hp}`;
-            document.getElementById('mob-hp-bar').style.width = (data.mob_hp / data.mob_max_hp * 100) + '%';
+            const currentMobHpBeforeTurn = Math.max(0, Number(window.currentMobHp || 0));
+            const nextMobHp = Math.max(0, Number(data.mob_hp || 0));
+            const nextMobMaxHp = Math.max(1, Number(data.mob_max_hp || window.currentMobMaxHp || 1));
+            window.currentMobMaxHp = nextMobMaxHp;
             applyRewardUi(data);
 
                 if (data.stream) {
@@ -428,7 +504,12 @@ async function doCombatTurn() {
                         headerEl.textContent = '';
                         await typeText(headerEl, '[전투 스크립트 ✨]', 7);
                     }
-                    await renderTurnScriptBlock(streamLog, data);
+                    await renderTurnScriptBlock(streamLog, data, {
+                        syncMonsterHp: true,
+                        initialMobHp: currentMobHpBeforeTurn,
+                        finalMobHp: nextMobHp,
+                        mobMaxHp: nextMobMaxHp,
+                    });
                     logBox.scrollTop = logBox.scrollHeight;
 
                     // 턴 스크립트 완료 후 버퍼된 SSE 내용을 즉시 이어붙이고, 미완료면 폴링 대기
@@ -442,7 +523,7 @@ async function doCombatTurn() {
                             }
                             logBox.scrollTop = logBox.scrollHeight;
                         }
-                        if (!sseDone) await wait(20);
+                        if (!sseDone) await wait(7);
                     }
 
                     isProcessingTurn = false;
@@ -451,7 +532,12 @@ async function doCombatTurn() {
                     else if (isAutoMode) { combatTimer = setTimeout(doCombatTurn, 500); }
                     return; // 완료
                 } else {
-                    await addTurnDamageBreakdown(data);
+                    await addTurnDamageBreakdown(data, {
+                        syncMonsterHp: true,
+                        initialMobHp: currentMobHpBeforeTurn,
+                        finalMobHp: nextMobHp,
+                        mobMaxHp: nextMobMaxHp,
+                    });
                     if (Array.isArray(data.logs)) {
                         for (const log of data.logs) addLog(log);
                     }
@@ -619,6 +705,7 @@ async function revive() {
 
 async function useSkill(skillId) {
     if (isProcessingTurn) { addLog('⏳ 턴을 기다리는 중입니다.'); return; }
+    const wasCombat = Boolean(window.isCombat && window.battleStage === BATTLE_STAGE.COMBAT);
     isProcessingTurn = true;
     const formData = new URLSearchParams();
     formData.append('skill_id', skillId);
@@ -633,14 +720,12 @@ async function useSkill(skillId) {
             }
             updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
             applyRewardUi(data);
-            if (data.mob_hp !== undefined) {
-                window.currentMobHp = Number(data.mob_hp || 0);
-                document.getElementById('mob-hp-text').innerText = `${data.mob_hp}/${window.currentMobMaxHp}`;
-                document.getElementById('mob-hp-bar').style.width = (data.mob_hp / window.currentMobMaxHp * 100) + '%';
+            if (wasCombat && data.mob_hp !== undefined && data.mob_hp !== null) {
+                updateMonsterBars(Number(data.mob_hp || 0), window.currentMobMaxHp || 1);
             }
-            if (data.mob_hp <= 0) {
+            if (wasCombat && Number(data.mob_hp || 0) <= 0) {
                 addLog('💫 승리했습니다!'); await wait(1000); exitToExploreState(); toggleEquip(0, -1);
-            } else if (isAutoMode) { doCombatTurn(); }
+            } else if (wasCombat && isAutoMode) { doCombatTurn(); }
         }
     }
     isProcessingTurn = false;
@@ -896,6 +981,7 @@ window.addEventListener('DOMContentLoaded', () => {
     toggleEquip(0, -1); 
     setupStatButtons();
     if (window.initialStatPoints !== undefined) updateStatUI(window.initialStatPoints);
+    refreshCommanderStatHighlights();
     if (window.isDead) enterDeadState(); 
     else if (window.isCombat) {
         // 새로고침 시 마지막 전투 단계를 복원(기본은 대치)

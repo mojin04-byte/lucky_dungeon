@@ -944,15 +944,17 @@ function handle_combat(PDO $pdo) {
 					if (rand(1, 100) <= floor($p_luk / 2)) { $is_h_crit = true; $hero_dmg = (int)floor($hero_dmg * $crit_mult); }
 					if ($is_h_crit) $hero_crit_hits++;
 
+					$mob_hp_before_attack_skills = $new_mob_hp;
 					apply_hero_skills($hero, $new_mob_hp, $logs, $total_gold_gain, $cmd, $hero_dmg, $is_h_crit);
 
 					$hcrit = $is_h_crit ? "⚡ <span style='color:yellow; font-weight:bold;'>[치명타]</span> " : "⚔️ ";
 					$logs[] = "{$hcrit}<span style='color:{$r[2]}'>[{$hero['hero_name']}]</span>(x{$hero_count})의 공격. {$hero_dmg} 피해.";
-					$total_hero_turn_damage += (int)$hero_dmg;
+					$hero_total_damage = (int)$hero_dmg + max(0, (int)($mob_hp_before_attack_skills - $new_mob_hp));
+					$total_hero_turn_damage += $hero_total_damage;
 					if (!isset($hero_damage_map[$hero['hero_name']])) $hero_damage_map[$hero['hero_name']] = 0;
-					$hero_damage_map[$hero['hero_name']] += (int)$hero_dmg;
-					if ((int)$hero_dmg > $max_hit_hero_dmg) {
-						$max_hit_hero_dmg = (int)$hero_dmg;
+					$hero_damage_map[$hero['hero_name']] += $hero_total_damage;
+					if ($hero_total_damage > $max_hit_hero_dmg) {
+						$max_hit_hero_dmg = $hero_total_damage;
 						$max_hit_hero_name = $hero['hero_name'];
 					}
 					$new_mob_hp = max(0, $new_mob_hp - $hero_dmg);
@@ -1266,7 +1268,9 @@ function handle_skill(PDO $pdo) {
 		$st->execute(array($uid));
 		$cmd = $st->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
-		if ((int)$cmd['is_combat'] === 0) throw new Exception('전투 중에만 스킬 사용 가능');
+		$is_in_combat = ((int)$cmd['is_combat'] === 1);
+		if ((int)$cmd['hp'] <= 0) throw new Exception('사망 상태에서는 스킬을 사용할 수 없습니다.');
+		if (!$is_in_combat && $skill_id !== 'heal') throw new Exception('힐은 비전투 중에도 사용할 수 있지만, 해당 스킬은 전투 중에만 사용 가능합니다.');
 
 		$new_mp = (int)$cmd['mp'];
 		$new_hp = (int)$cmd['hp'];
@@ -1287,7 +1291,7 @@ function handle_skill(PDO $pdo) {
 		}
 		$logs = array("🔮 <b>[{$skill['name']}]</b> 시전! ({$cost_text})");
 		$mag_amp = 1 + ((int)$cmd['stat_mag'] * 0.01);
-		if (!isset($_SESSION['combat_state'])) $_SESSION['combat_state'] = array('hero_attack_counts' => array(), 'enemy_debuffs' => array());
+		if ($is_in_combat && !isset($_SESSION['combat_state'])) $_SESSION['combat_state'] = array('hero_attack_counts' => array(), 'enemy_debuffs' => array());
 
 		$p_str = (int)$cmd['stat_str'];
 		$p_mag = (int)$cmd['stat_mag'];
@@ -1306,6 +1310,7 @@ function handle_skill(PDO $pdo) {
 		$total_gold_gain = 0;
 
 		if ($skill['type'] === 'damage') {
+			if (!$is_in_combat) throw new Exception('해당 스킬은 전투 중에만 사용 가능합니다.');
 			$damage = (int)floor(((int)$skill['value'] + floor((int)$cmd['stat_mag'] * 1.5)) * $mag_amp);
 			if ($berserk_bonus_pct > 0) $damage = (int)floor($damage * (1 + ($berserk_bonus_pct / 100)));
 			$new_mob_hp = max(0, $new_mob_hp - $damage);
@@ -1315,6 +1320,7 @@ function handle_skill(PDO $pdo) {
 			$new_hp = min((int)$cmd['max_hp'], $new_hp + $heal);
 			$logs[] = "💚 체력을 <span style='color:lightgreen;'>{$heal}</span> 회복.";
 		} else {
+			if (!$is_in_combat) throw new Exception('해당 스킬은 전투 중에만 사용 가능합니다.');
 			if (!isset($_SESSION['combat_state']['player_buffs'])) $_SESSION['combat_state']['player_buffs'] = array();
 			$buff_key = (string)$skill['effect'];
 			$_SESSION['combat_state']['player_buffs'][$buff_key] = array('value' => (int)$skill['value'], 'turns_left' => (int)$skill['duration']);
@@ -1328,7 +1334,7 @@ function handle_skill(PDO $pdo) {
 			}
 		}
 
-		if ($new_mob_hp > 0) {
+		if ($is_in_combat && $new_mob_hp > 0) {
 			$deck_stmt = $pdo->prepare("SELECT hero_rank, hero_name, MAX(level) AS level, SUM(quantity) AS equipped_count FROM tb_heroes WHERE uid = ? AND is_equipped = 1 AND quantity > 0 GROUP BY hero_rank, hero_name");
 			$deck_stmt->execute(array($uid));
 			$deck = $deck_stmt->fetchAll();
@@ -1370,38 +1376,43 @@ function handle_skill(PDO $pdo) {
 			}
 		}
 
-		if ($total_gold_gain > 0 && $new_mob_hp > 0) {
-			$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($total_gold_gain, $uid));
-		}
-
 		$reward_meta = null;
-		if ($new_mob_hp <= 0) {
-			$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 쓰러졌습니다!";
-			$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
-			$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp']);
-			$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
-			foreach ($reward_meta['levelup_logs'] as $levelup_log) {
-				$logs[] = $levelup_log;
+		if ($is_in_combat) {
+			if ($total_gold_gain > 0 && $new_mob_hp > 0) {
+				$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($total_gold_gain, $uid));
 			}
-			$new_hp = (int)$reward_meta['new_hp'];
-			$new_mp = (int)$reward_meta['new_mp'];
-			unset($_SESSION['combat_state']);
-			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")
-				->execute(array($new_hp, $new_mp, $uid));
-			$new_mob_hp = 0;
+
+			if ($new_mob_hp <= 0) {
+				$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 쓰러졌습니다!";
+				$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
+				$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp']);
+				$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
+				foreach ($reward_meta['levelup_logs'] as $levelup_log) {
+					$logs[] = $levelup_log;
+				}
+				$new_hp = (int)$reward_meta['new_hp'];
+				$new_mp = (int)$reward_meta['new_mp'];
+				unset($_SESSION['combat_state']);
+				$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")
+					->execute(array($new_hp, $new_mp, $uid));
+				$new_mob_hp = 0;
+			} else {
+				tick_player_buffs($logs, $newly_applied_buffs);
+				$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, mob_hp = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $new_mob_hp, $uid));
+			}
 		} else {
-			tick_player_buffs($logs, $newly_applied_buffs);
-			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, mob_hp = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $new_mob_hp, $uid));
+			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $uid));
 		}
 		$pdo->commit();
 		echo json_encode(array(
 			'status' => 'success',
 			'logs' => $logs,
+			'is_combat' => $is_in_combat,
 			'new_hp' => $new_hp,
 			'max_hp' => $reward_meta ? (int)$reward_meta['max_hp'] : (int)$cmd['max_hp'],
 			'new_mp' => $new_mp,
 			'max_mp' => $reward_meta ? (int)$reward_meta['max_mp'] : (int)$cmd['max_mp'],
-			'mob_hp' => $new_mob_hp,
+			'mob_hp' => $is_in_combat ? $new_mob_hp : null,
 			'new_gold' => $reward_meta ? (int)$reward_meta['new_gold'] : ((int)$cmd['gold'] + (int)$total_gold_gain),
 			'reward_gold' => $reward_meta ? (int)$reward_meta['reward_gold'] : (int)$total_gold_gain,
 			'reward_exp' => $reward_meta ? (int)$reward_meta['reward_exp'] : 0,
@@ -2233,7 +2244,7 @@ function handle_stream_combat_ai(PDO $pdo) {
 	$ai = request_ai_text_with_fallback($combat_seed, false, 'combat');
 	$ai_text = is_array($ai) ? (string)$ai['text'] : (string)$ai;
 	$meta = is_array($ai) ? array('provider' => $ai['provider'], 'model' => $ai['model']) : array('provider' => 'raw', 'model' => 'unknown');
-	stream_text_as_sse($ai_text, 22000, $meta, 1, 1);
+	stream_text_as_sse($ai_text, 7000, $meta, 1, 1);
 	echo "data: [DONE]\n\n";
 	@ob_flush(); @flush();
 	exit;

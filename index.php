@@ -61,6 +61,23 @@ function get_exp_to_next_for_level($level) {
 
 $exp_to_next = get_exp_to_next_for_level((int)($commander['level'] ?? 1));
 $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $exp_to_next) * 100) : 100;
+$commander_stat_values = [
+    'str' => (int)($commander['stat_str'] ?? 0),
+    'mag' => (int)($commander['stat_mag'] ?? 0),
+    'agi' => (int)($commander['stat_agi'] ?? 0),
+    'luk' => (int)($commander['stat_luk'] ?? 0),
+    'men' => (int)($commander['stat_men'] ?? 0),
+    'vit' => (int)($commander['stat_vit'] ?? 0),
+];
+$commander_stat_max = max($commander_stat_values);
+$commander_stat_min = min($commander_stat_values);
+$commander_stat_classes = array_fill_keys(array_keys($commander_stat_values), 'stat-value');
+if ($commander_stat_max > $commander_stat_min) {
+    foreach ($commander_stat_values as $key => $value) {
+        if ($value === $commander_stat_max) $commander_stat_classes[$key] .= ' stat-highest';
+        if ($value === $commander_stat_min) $commander_stat_classes[$key] .= ' stat-lowest';
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -77,7 +94,9 @@ $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $ex
         .right-panel { width: 25%; background: #111; border-left: 1px solid #333; }
         h2 { color: #ffa500; font-size: 1.2rem; margin-top: 0; border-bottom: 1px solid #333; padding-bottom: 10px; }
         .stat-box { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.95rem; border-bottom: 1px dashed #222; padding-bottom: 5px; }
-        .stat-value { font-weight: bold; color: #4caf50; }
+        .stat-value { font-weight: bold; color: #4caf50; transition: color 0.2s ease, text-shadow 0.2s ease; }
+        .stat-value.stat-highest { color: #ffca28; text-shadow: 0 0 10px rgba(255, 202, 40, 0.35); }
+        .stat-value.stat-lowest { color: #80deea; text-shadow: 0 0 8px rgba(128, 222, 234, 0.25); }
         .bar-bg { background: #333; border-radius: 4px; width: 100%; height: 16px; margin-bottom: 15px; overflow: hidden; }
         .hp-bar { background: #4caf50; height: 100%; width: <?= ($commander['hp'] / $commander['max_hp']) * 100 ?>%; transition: width 0.3s; }
         .mp-bar { background: #2196f3; height: 100%; width: <?= ($commander['mp'] / $commander['max_mp']) * 100 ?>%; transition: width 0.3s; }
@@ -168,12 +187,12 @@ $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $ex
         <h3 style="color: #ccc; font-size: 1rem; border-bottom: 1px solid #333; padding-bottom: 5px; display:flex; justify-content:space-between;">
             <span>📊 사령관 스탯</span> <span style="font-size:0.8rem; color:#ff9800;">POINT: <span id="stat-points"><?= $commander['stat_points'] ?? 0 ?></span></span>
         </h3>
-        <div class="stat-box" title="STR: 사령관 기본 공격식에 STR*2 적용, 물리 영웅 피해 +2%/10 STR, 함정 파괴 확률 min(35, floor(STR/3))"><span class="stat-name">힘 (STR)</span> <div><span class="stat-value" id="val-str"><?= $commander['stat_str'] ?></span> <button class="btn-stat-up" data-stat="str" title="STR 1 증가">+</button></div></div>
-        <div class="stat-box" title="MAG: 액티브 스킬 피해/회복 증폭, 마법 영웅 피해 +2%/10 MAG, 탐색 시 MP 회복 floor(MAG/10)"><span class="stat-name">마력 (MAG)</span> <div><span class="stat-value" id="val-mag"><?= $commander['stat_mag'] ?></span> <button class="btn-stat-up" data-stat="mag" title="MAG 1 증가">+</button></div></div>
-        <div class="stat-box" title="AGI: 도주 확률 40+AGI, 사령관/영웅 연속 공격 확률 floor(AGI/5)%"><span class="stat-name">민첩 (AGI)</span> <div><span class="stat-value" id="val-agi"><?= $commander['stat_agi'] ?></span> <button class="btn-stat-up" data-stat="agi" title="AGI 1 증가">+</button></div></div>
-        <div class="stat-box" title="LUK: 치명타 확률 floor(LUK/2)%, 치명 배율 1.5+LUK*0.01, 탐험 골드/행운 이벤트 강화, 소환(전설/영웅/희귀) 가중치 보정"><span class="stat-name">행운 (LUK)</span> <div><span class="stat-value" id="val-luk"><?= $commander['stat_luk'] ?></span> <button class="btn-stat-up" data-stat="luk" title="LUK 1 증가">+</button></div></div>
-        <div class="stat-box" title="MEN: 최대 MP +5/포인트, 휴식 추가 회복 +MEN*3, 영웅 피해 배율 1+MEN*0.005, 영웅 스킬 발동 +2%/10 MEN"><span class="stat-name">정신력 (MEN)</span> <div><span class="stat-value" id="val-men"><?= $commander['stat_men'] ?></span> <button class="btn-stat-up" data-stat="men" title="MEN 1 증가">+</button></div></div>
-        <div class="stat-box" title="VIT: 최대 HP +20/포인트, 피해 감소 floor(VIT/2), 반격 방어 floor(VIT/5)%, 영웅 보호막 floor(VIT/10)% (최대 40%)"><span class="stat-name">체력 (VIT)</span> <div><span class="stat-value" id="val-vit"><?= $commander['stat_vit'] ?></span> <button class="btn-stat-up" data-stat="vit" title="VIT 1 증가">+</button></div></div>
+        <div class="stat-box" title="STR: 사령관 기본 공격식에 STR*2 적용, 물리 영웅 피해 +2%/10 STR, 함정 파괴 확률 min(35, floor(STR/3))"><span class="stat-name">힘 (STR)</span> <div><span class="<?= $commander_stat_classes['str'] ?>" data-commander-stat="str" id="val-str"><?= $commander['stat_str'] ?></span> <button class="btn-stat-up" data-stat="str" title="STR 1 증가">+</button></div></div>
+        <div class="stat-box" title="MAG: 액티브 스킬 피해/회복 증폭, 마법 영웅 피해 +2%/10 MAG, 탐색 시 MP 회복 floor(MAG/10)"><span class="stat-name">마력 (MAG)</span> <div><span class="<?= $commander_stat_classes['mag'] ?>" data-commander-stat="mag" id="val-mag"><?= $commander['stat_mag'] ?></span> <button class="btn-stat-up" data-stat="mag" title="MAG 1 증가">+</button></div></div>
+        <div class="stat-box" title="AGI: 도주 확률 40+AGI, 사령관/영웅 연속 공격 확률 floor(AGI/5)%"><span class="stat-name">민첩 (AGI)</span> <div><span class="<?= $commander_stat_classes['agi'] ?>" data-commander-stat="agi" id="val-agi"><?= $commander['stat_agi'] ?></span> <button class="btn-stat-up" data-stat="agi" title="AGI 1 증가">+</button></div></div>
+        <div class="stat-box" title="LUK: 치명타 확률 floor(LUK/2)%, 치명 배율 1.5+LUK*0.01, 탐험 골드/행운 이벤트 강화, 소환(전설/영웅/희귀) 가중치 보정"><span class="stat-name">행운 (LUK)</span> <div><span class="<?= $commander_stat_classes['luk'] ?>" data-commander-stat="luk" id="val-luk"><?= $commander['stat_luk'] ?></span> <button class="btn-stat-up" data-stat="luk" title="LUK 1 증가">+</button></div></div>
+        <div class="stat-box" title="MEN: 최대 MP +5/포인트, 휴식 추가 회복 +MEN*3, 영웅 피해 배율 1+MEN*0.005, 영웅 스킬 발동 +2%/10 MEN"><span class="stat-name">정신력 (MEN)</span> <div><span class="<?= $commander_stat_classes['men'] ?>" data-commander-stat="men" id="val-men"><?= $commander['stat_men'] ?></span> <button class="btn-stat-up" data-stat="men" title="MEN 1 증가">+</button></div></div>
+        <div class="stat-box" title="VIT: 최대 HP +20/포인트, 피해 감소 floor(VIT/2), 반격 방어 floor(VIT/5)%, 영웅 보호막 floor(VIT/10)% (최대 40%)"><span class="stat-name">체력 (VIT)</span> <div><span class="<?= $commander_stat_classes['vit'] ?>" data-commander-stat="vit" id="val-vit"><?= $commander['stat_vit'] ?></span> <button class="btn-stat-up" data-stat="vit" title="VIT 1 증가">+</button></div></div>
         <div class="stat-box"><span class="stat-name">성향</span> <span class="stat-value"><?= $commander['disposition'] ?> (<?php 
             $disp = $commander['disposition'];
             if ($disp <= 20) echo '극도로 조심'; 
@@ -223,8 +242,8 @@ $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $ex
             <div class="btn" onclick="sendAction('action')">탐색하기 👣</div>
             <div class="btn" onclick="sendAction('rest')">휴식하기 🏕️</div>
             <div class="btn" style="background:#1976d2;" onclick="sendAction('next_floor')">다음 층 이동 ⬆️</div>
+            <div class="btn" style="background: #2196f3;" onclick="useSkill('heal')">💚 힐<br><span style='font-size:0.7rem;'>(MP 30)</span></div>
             <div class="btn btn-summon" onclick="sendAction('summon')">영웅 소환 ✨</div>
-            <div class="btn" style="background:#673ab7;" onclick="openCombineModal()">조합/진화 🔮</div>
         </div>
 
         <div id="encounter-actions" class="action-container" style="display: none; background: #310;">
@@ -345,7 +364,10 @@ $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $ex
     <div class="panel right-panel">
         <h2>⚔️ 출전 덱 (<span id="deck-count-display">0</span>/5)</h2>
         <div id="deck-list"></div>
-        <h2>🎒 보유 영웅</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid #333;">
+            <h2 style="margin:0; padding:0; border:none;">🎒 보유 영웅</h2>
+            <div class="btn" style="padding:8px 12px; font-size:0.85rem; background:#673ab7; white-space:nowrap;" onclick="openCombineModal()">조합/진화 🔮</div>
+        </div>
         <div id="hero-list"></div>
         <div id="expedition-section" style="margin-top: 20px; background: #222; padding: 15px; border-radius: 5px;">
             <h3 style="color: #ccc; font-size: 1rem; margin:0 0 10px 0;">⚔️ 영웅 토벌대 파견</h3>
