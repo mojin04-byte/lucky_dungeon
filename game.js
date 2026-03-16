@@ -189,10 +189,55 @@ function getTurnDamageLines(data) {
     return getTurnDamageSteps(data).map((step) => step.text);
 }
 
+function getTurnScriptSteps(data) {
+    const steps = getTurnDamageSteps(data).map((step) => ({
+        text: step.text,
+        damage: step.damage,
+        type: 'outgoing-damage'
+    }));
+
+    const incomingDamage = Number((data && data.incoming_damage) || 0);
+    const incomingSource = String((data && data.incoming_damage_source) || '적');
+    if (incomingDamage > 0) {
+        steps.push({
+            text: `❗ 피격 경고: ${incomingSource}의 반격으로 사령관이 ${incomingDamage} 데미지를 받았습니다.`,
+            damage: incomingDamage,
+            type: 'incoming-damage'
+        });
+    }
+
+    return steps;
+}
+
 function toPlainLogText(message) {
     const tmp = document.createElement('div');
     tmp.innerHTML = String(message || '');
     return (tmp.textContent || tmp.innerText || '').trim();
+}
+
+function getCurrentPlayerHp() {
+    const hpText = document.getElementById('player-hp-text');
+    const match = hpText ? hpText.innerText.match(/\((\d+)\s*\/\s*\d+\)/) : null;
+    return match ? Number(match[1]) : 0;
+}
+
+function triggerIncomingDamageEffect() {
+    const centerPanel = document.querySelector('.center-panel');
+    const hpBar = document.getElementById('player-hp-bar');
+    const hpText = document.getElementById('player-hp-text');
+
+    if (centerPanel) {
+        centerPanel.classList.remove('damage-flash');
+        void centerPanel.offsetWidth;
+        centerPanel.classList.add('damage-flash');
+    }
+
+    [hpBar, hpText].forEach((el) => {
+        if (!el) return;
+        el.classList.remove('hp-hit');
+        void el.offsetWidth;
+        el.classList.add('hp-hit');
+    });
 }
 
 async function typeText(targetEl, text, delayMs = 8) {
@@ -214,51 +259,71 @@ function getStatusEffectLines(data) {
 
 async function renderTurnScriptBlock(targetEl, data, options = {}) {
     if (!targetEl) return;
-    const damageSteps = getTurnDamageSteps(data);
+    const scriptSteps = getTurnScriptSteps(data);
     const statusLines = getStatusEffectLines(data);
-    if (damageSteps.length === 0 && statusLines.length === 0) return;
+    if (scriptSteps.length === 0 && statusLines.length === 0) return;
 
     const textEl = targetEl.querySelector('.turn-script-lines') || targetEl.querySelector('.stream-text');
     if (!textEl) return;
-    textEl.textContent = '';
-    textEl.style.whiteSpace = 'pre-wrap';
+    textEl.innerHTML = '';
+    textEl.style.whiteSpace = 'normal';
 
     let currentMobHp = Number((options.initialMobHp !== undefined) ? options.initialMobHp : (window.currentMobHp || 0));
     const finalMobHp = Math.max(0, Number((options.finalMobHp !== undefined) ? options.finalMobHp : ((data && data.mob_hp) || currentMobHp)));
     const mobMaxHp = Math.max(1, Number((options.mobMaxHp !== undefined) ? options.mobMaxHp : ((data && data.mob_max_hp) || window.currentMobMaxHp || 1)));
+    let playerHpApplied = false;
+    const initialPlayerHp = Number((options.initialPlayerHp !== undefined) ? options.initialPlayerHp : getCurrentPlayerHp());
+    const finalPlayerHp = Math.max(0, Number((options.finalPlayerHp !== undefined) ? options.finalPlayerHp : initialPlayerHp));
+    const playerMaxHp = Math.max(1, Number((options.playerMaxHp !== undefined) ? options.playerMaxHp : (window.playerMaxHp || 1)));
+    const finalPlayerMp = Math.max(0, Number((options.finalPlayerMp !== undefined) ? options.finalPlayerMp : 0));
+    const playerMaxMp = Math.max(1, Number((options.playerMaxMp !== undefined) ? options.playerMaxMp : (window.playerMaxMp || 1)));
 
     if (options.syncMonsterHp) updateMonsterBars(currentMobHp, mobMaxHp);
+    if (options.syncPlayerHp) updatePlayerBars(initialPlayerHp, playerMaxHp, finalPlayerMp, playerMaxMp);
 
-    for (const step of damageSteps) {
-        await typeText(textEl, toPlainLogText(step.text));
-        textEl.textContent += '\n';
+    for (const step of scriptSteps) {
+        const lineEl = document.createElement('div');
+        lineEl.className = 'turn-script-line' + (step.type ? ` ${step.type}` : '');
+        textEl.appendChild(lineEl);
+        await typeText(lineEl, toPlainLogText(step.text));
         const logBox = document.getElementById('game-log');
         if (logBox) logBox.scrollTop = logBox.scrollHeight;
-        if (options.syncMonsterHp) {
+        if (step.type === 'outgoing-damage' && options.syncMonsterHp) {
             currentMobHp = Math.max(finalMobHp, currentMobHp - Math.max(0, Number(step.damage) || 0));
             updateMonsterBars(currentMobHp, mobMaxHp);
             await wait(MONSTER_HP_STEP_DELAY);
+        }
+        if (step.type === 'incoming-damage' && options.syncPlayerHp) {
+            updatePlayerBars(finalPlayerHp, playerMaxHp, finalPlayerMp, playerMaxMp);
+            triggerIncomingDamageEffect();
+            playerHpApplied = true;
+            await wait(120);
         }
         await wait(options.syncMonsterHp ? 16 : 23);
     }
 
     for (const line of statusLines) {
-        await typeText(textEl, toPlainLogText(line));
-        textEl.textContent += '\n';
+        const lineEl = document.createElement('div');
+        lineEl.className = 'turn-script-line status-effect';
+        textEl.appendChild(lineEl);
+        await typeText(lineEl, toPlainLogText(line));
         const logBox = document.getElementById('game-log');
         if (logBox) logBox.scrollTop = logBox.scrollHeight;
         await wait(23);
     }
 
     if (options.syncMonsterHp) updateMonsterBars(finalMobHp, mobMaxHp);
+    if (options.syncPlayerHp && !playerHpApplied) {
+        updatePlayerBars(finalPlayerHp, playerMaxHp, finalPlayerMp, playerMaxMp);
+    }
 }
 
-async function addTypedLogLine(message, isSystem = true) {
+async function addTypedLogLine(message, isSystem = true, extraClass = '') {
     const plain = toPlainLogText(message);
     if (!plain) return;
     const logBox = document.getElementById('game-log');
     const newLog = document.createElement('div');
-    newLog.className = 'log-entry' + (isSystem ? ' system' : '');
+    newLog.className = 'log-entry' + (isSystem ? ' system' : '') + (extraClass ? ` ${extraClass}` : '');
     newLog.style.whiteSpace = 'pre-wrap';
     newLog.textContent = '';
     logBox.appendChild(newLog);
@@ -267,21 +332,34 @@ async function addTypedLogLine(message, isSystem = true) {
 }
 
 async function addTurnDamageBreakdown(data, options = {}) {
-    const damageSteps = getTurnDamageSteps(data);
+    const scriptSteps = getTurnScriptSteps(data);
     const statusLines = getStatusEffectLines(data);
 
     let currentMobHp = Number((options.initialMobHp !== undefined) ? options.initialMobHp : (window.currentMobHp || 0));
     const finalMobHp = Math.max(0, Number((options.finalMobHp !== undefined) ? options.finalMobHp : ((data && data.mob_hp) || currentMobHp)));
     const mobMaxHp = Math.max(1, Number((options.mobMaxHp !== undefined) ? options.mobMaxHp : ((data && data.mob_max_hp) || window.currentMobMaxHp || 1)));
+    let playerHpApplied = false;
+    const initialPlayerHp = Number((options.initialPlayerHp !== undefined) ? options.initialPlayerHp : getCurrentPlayerHp());
+    const finalPlayerHp = Math.max(0, Number((options.finalPlayerHp !== undefined) ? options.finalPlayerHp : initialPlayerHp));
+    const playerMaxHp = Math.max(1, Number((options.playerMaxHp !== undefined) ? options.playerMaxHp : (window.playerMaxHp || 1)));
+    const finalPlayerMp = Math.max(0, Number((options.finalPlayerMp !== undefined) ? options.finalPlayerMp : 0));
+    const playerMaxMp = Math.max(1, Number((options.playerMaxMp !== undefined) ? options.playerMaxMp : (window.playerMaxMp || 1)));
 
     if (options.syncMonsterHp) updateMonsterBars(currentMobHp, mobMaxHp);
+    if (options.syncPlayerHp) updatePlayerBars(initialPlayerHp, playerMaxHp, finalPlayerMp, playerMaxMp);
 
-    for (const step of damageSteps) {
-        await addTypedLogLine(step.text, true);
-        if (options.syncMonsterHp) {
+    for (const step of scriptSteps) {
+        await addTypedLogLine(step.text, true, step.type === 'incoming-damage' ? 'incoming-damage' : '');
+        if (step.type === 'outgoing-damage' && options.syncMonsterHp) {
             currentMobHp = Math.max(finalMobHp, currentMobHp - Math.max(0, Number(step.damage) || 0));
             updateMonsterBars(currentMobHp, mobMaxHp);
             await wait(MONSTER_HP_STEP_DELAY);
+        }
+        if (step.type === 'incoming-damage' && options.syncPlayerHp) {
+            updatePlayerBars(finalPlayerHp, playerMaxHp, finalPlayerMp, playerMaxMp);
+            triggerIncomingDamageEffect();
+            playerHpApplied = true;
+            await wait(120);
         }
         await wait(options.syncMonsterHp ? 16 : 20);
     }
@@ -292,6 +370,9 @@ async function addTurnDamageBreakdown(data, options = {}) {
     }
 
     if (options.syncMonsterHp) updateMonsterBars(finalMobHp, mobMaxHp);
+    if (options.syncPlayerHp && !playerHpApplied) {
+        updatePlayerBars(finalPlayerHp, playerMaxHp, finalPlayerMp, playerMaxMp);
+    }
 }
 
 function formatAiBadge(meta) {
@@ -467,7 +548,12 @@ async function doCombatTurn() {
             }
             isProcessingTurn = false;
         } else {
-            updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
+            const currentPlayerHpBeforeTurn = getCurrentPlayerHp();
+            const nextPlayerHp = Math.max(0, Number(data.new_hp || 0));
+            const nextPlayerMaxHp = Math.max(1, Number(data.max_hp || window.playerMaxHp || 1));
+            const nextPlayerMp = Math.max(0, Number(data.new_mp || 0));
+            const nextPlayerMaxMp = Math.max(1, Number(data.max_mp || window.playerMaxMp || 1));
+            updatePlayerBars(currentPlayerHpBeforeTurn, nextPlayerMaxHp, nextPlayerMp, nextPlayerMaxMp);
             const currentMobHpBeforeTurn = Math.max(0, Number(window.currentMobHp || 0));
             const nextMobHp = Math.max(0, Number(data.mob_hp || 0));
             const nextMobMaxHp = Math.max(1, Number(data.mob_max_hp || window.currentMobMaxHp || 1));
@@ -507,9 +593,15 @@ async function doCombatTurn() {
                     }
                     await renderTurnScriptBlock(streamLog, data, {
                         syncMonsterHp: true,
+                        syncPlayerHp: true,
                         initialMobHp: currentMobHpBeforeTurn,
                         finalMobHp: nextMobHp,
                         mobMaxHp: nextMobMaxHp,
+                        initialPlayerHp: currentPlayerHpBeforeTurn,
+                        finalPlayerHp: nextPlayerHp,
+                        playerMaxHp: nextPlayerMaxHp,
+                        finalPlayerMp: nextPlayerMp,
+                        playerMaxMp: nextPlayerMaxMp,
                     });
                     logBox.scrollTop = logBox.scrollHeight;
 
@@ -535,9 +627,15 @@ async function doCombatTurn() {
                 } else {
                     await addTurnDamageBreakdown(data, {
                         syncMonsterHp: true,
+                        syncPlayerHp: true,
                         initialMobHp: currentMobHpBeforeTurn,
                         finalMobHp: nextMobHp,
                         mobMaxHp: nextMobMaxHp,
+                        initialPlayerHp: currentPlayerHpBeforeTurn,
+                        finalPlayerHp: nextPlayerHp,
+                        playerMaxHp: nextPlayerMaxHp,
+                        finalPlayerMp: nextPlayerMp,
+                        playerMaxMp: nextPlayerMaxMp,
                     });
                     if (Array.isArray(data.logs)) {
                         for (const log of data.logs) addLog(log);

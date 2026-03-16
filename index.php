@@ -104,6 +104,10 @@ if ($commander_stat_max > $commander_stat_min) {
         .log-container { flex-grow: 1; padding: 15px; overflow-y: auto; font-size: 1.05rem; line-height: 1.6; }
         .log-entry { margin-bottom: 12px; padding: 12px; background: #1a1a1a; border-left: 4px solid #4caf50; border-radius: 4px; animation: fadeIn 0.3s; }
         .log-entry.system { border-left-color: #ffa500; color: #ffeb3b; }
+        .log-entry.incoming-damage { border-left-color: #ff5252; background: linear-gradient(90deg, rgba(120, 10, 10, 0.7) 0%, rgba(26, 26, 26, 0.95) 100%); color: #ffd6d6; box-shadow: 0 0 18px rgba(255, 82, 82, 0.22); }
+        .turn-script-line { white-space: pre-wrap; margin: 4px 0; }
+        .turn-script-line.incoming-damage { margin: 8px 0 6px; padding: 8px 10px; border-left: 4px solid #ff5252; border-radius: 6px; background: linear-gradient(90deg, rgba(140, 20, 20, 0.78) 0%, rgba(30, 8, 8, 0.95) 100%); color: #ffd6d6; font-weight: bold; text-shadow: 0 0 10px rgba(255, 82, 82, 0.35); box-shadow: 0 0 14px rgba(255, 82, 82, 0.18); }
+        .turn-script-line.status-effect { color: #c8f1ff; }
         .action-container { padding: 20px; background: #111; border-top: 1px solid #333; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .btn { padding: 15px; background: #2c2c2c; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s; text-align: center; user-select: none; }
         .btn:hover { background: #4caf50; color: #000; }
@@ -117,6 +121,12 @@ if ($commander_stat_max > $commander_stat_min) {
         .damage-flash { animation: flashRed 0.3s; }
         @keyframes flashRed { 0% { background-color: #500000; } 100% { background-color: #0a0a0a; } }
         .heal-flash { animation: flashGreen 0.5s ease-out; }
+        .hp-hit { animation: hpHitPulse 0.45s ease-out; }
+        @keyframes hpHitPulse {
+            0% { filter: brightness(1); transform: scaleX(1); }
+            35% { filter: brightness(1.9); transform: scaleX(1.02); }
+            100% { filter: brightness(1); transform: scaleX(1); }
+        }
         @keyframes flashGreen { 0% { background-color: #003300; } 100% { background-color: #0a0a0a; } }
         /* 모달 스타일 */
         .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:999; justify-content:center; align-items:center; }

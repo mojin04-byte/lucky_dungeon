@@ -866,6 +866,8 @@ function handle_combat(PDO $pdo) {
 		$logs = array();
 		$new_mob_hp = (int)$cmd['mob_hp'];
 		$new_hp = (int)$cmd['hp'];
+		$incoming_damage = 0;
+		$incoming_damage_source = '';
 		$total_hero_turn_damage = 0;
 		$turn_damage_details = array();
 		$hero_damage_map = array();
@@ -995,6 +997,8 @@ function handle_combat(PDO $pdo) {
 				$status = 'ongoing';
 			} else {
 				$mob_dmg = max(1, (int)$cmd['mob_atk'] - floor($p_vit / 2));
+				$incoming_damage = (int)$mob_dmg;
+				$incoming_damage_source = (string)$cmd['mob_name'];
 				$logs[] = "🩸 <b>{$cmd['mob_name']}</b>의 반격! <span style='color:#ff5252;'>{$mob_dmg}</span> 피해.";
 				$new_hp = max(0, $new_hp - $mob_dmg);
 				if ($new_hp <= 0) {
@@ -1027,6 +1031,8 @@ function handle_combat(PDO $pdo) {
 			'status' => $status,
 			'stream' => true,
 			'logs' => $logs,
+				'incoming_damage' => $incoming_damage,
+				'incoming_damage_source' => $incoming_damage_source,
 			'status_effect_logs' => $status_effect_logs,
 			'turn_damage_details' => $turn_damage_details,
 			'player_dmg' => (int)$player_dmg,
