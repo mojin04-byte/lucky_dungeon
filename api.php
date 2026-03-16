@@ -320,6 +320,19 @@ function estimate_expected_turn_damage(PDO $pdo, $uid, $cmd) {
 	return max(10, (int)floor($expected_turn_damage));
 }
 
+function apply_adaptive_hp_diminishing($expected_turn_damage, $floor_reference_turn_damage, $is_boss = false) {
+	$expected = max(1.0, (float)$expected_turn_damage);
+	$reference = max(1.0, (float)$floor_reference_turn_damage);
+	if ($expected <= $reference) return (int)round($expected);
+
+	$excess = $expected - $reference;
+	$linear_ratio = $is_boss ? 0.50 : 0.42;
+	$sqrt_gain = $is_boss ? 2.1 : 1.8;
+	$diminished_excess = ($excess * $linear_ratio) + (sqrt($excess) * $sqrt_gain);
+
+	return max(1, (int)round($reference + $diminished_excess));
+}
+
 function get_total_hero_units(PDO $pdo, $uid) {
 	$st = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM tb_heroes WHERE uid = ? AND quantity > 0");
 	$st->execute(array($uid));
@@ -804,7 +817,9 @@ function handle_action(PDO $pdo) {
 				$var_max = $tmp;
 			}
 			$variance = rand($var_min, $var_max) / 100.0;
-			$adaptive_hp = (int)round((($expected_turn_damage * $target_turns) + ($base_mob_hp * ($is_boss ? 0.12 : 0.08))) * $variance);
+			$floor_reference_turn_damage = max(10, (int)round($base_mob_hp / max(1, $target_turns)));
+			$effective_turn_damage = apply_adaptive_hp_diminishing($expected_turn_damage, $floor_reference_turn_damage, $is_boss);
+			$adaptive_hp = (int)round((($effective_turn_damage * $target_turns) + ($base_mob_hp * ($is_boss ? 0.12 : 0.08))) * $variance);
 			$min_hp = $is_boss ? max(300, (int)floor($base_mob_hp * 0.30)) : max(60, (int)floor($base_mob_hp * 0.25));
 			$mob_max_hp = max($min_hp, $adaptive_hp);
 
@@ -984,6 +999,7 @@ function handle_combat(PDO $pdo) {
 		$crit_mult = 1.5 + ($p_luk * 0.01);
 		$men_mult = 1 + ($p_men * 0.005);
 		$agi_double_chance = floor($p_agi / 5);
+		$agi_evasion_chance = min(100, max(0, (int)floor($p_agi / 4)));
 		$vit_block_chance = floor($p_vit / 5);
 		$hero_shield_chance = (count($deck) > 0) ? min(40, (int)floor($p_vit / 10)) : 0;
 		$str_party_bonus_pct = (int)floor($p_str / 10) * 2;
@@ -1050,9 +1066,6 @@ function handle_combat(PDO $pdo) {
 			}
 		}
 
-		if ($total_gold_gain > 0 && $new_mob_hp > 0) {
-			$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($total_gold_gain, $uid));
-		}
 		foreach ($hero_damage_map as $hero_name => $hero_damage) {
 			$turn_damage_details[] = array('name' => (string)$hero_name, 'damage' => (int)$hero_damage);
 		}
@@ -1060,6 +1073,7 @@ function handle_combat(PDO $pdo) {
 		$reward_meta = null;
 		if ($new_mob_hp <= 0) {
 			$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 쓰러졌습니다!";
+			$logs[] = "⚡ <span style='color:#ffeb3b; font-weight:bold;'>[선제 제압]</span> 반격 없이 전투를 끝냈습니다!";
 			$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
 			$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => (int)$cmd['mp'])), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp']);
 			$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
@@ -1078,6 +1092,9 @@ function handle_combat(PDO $pdo) {
 			} elseif ($hero_shield_chance > 0 && rand(1, 100) <= $hero_shield_chance) {
 				$logs[] = "🛡️ <span style='color:#80cbc4; font-weight:bold;'>[VIT 시너지]</span> 영웅의 보호막이 반격을 상쇄했습니다!";
 				$status = 'ongoing';
+			} elseif ($agi_evasion_chance > 0 && rand(1, 100) <= $agi_evasion_chance) {
+				$logs[] = "💨 <span style='color:#80d8ff; font-weight:bold;'>[AGI 회피]</span> 사령관이 적의 반격을 완전히 회피했습니다!";
+				$status = 'ongoing';
 			} elseif (rand(1, 100) <= $vit_block_chance) {
 				$logs[] = "🛡️ <span style='color:orange; font-weight:bold;'>[VIT 특성 발동]</span> 사령관이 공격을 막아냈습니다!";
 				$status = 'ongoing';
@@ -1087,14 +1104,36 @@ function handle_combat(PDO $pdo) {
 				$incoming_damage_source = (string)$cmd['mob_name'];
 				$logs[] = "🩸 <b>{$cmd['mob_name']}</b>의 반격! <span style='color:#ff5252;'>{$mob_dmg}</span> 피해.";
 				$new_hp = max(0, $new_hp - $mob_dmg);
+
+				$reflect_dmg = max(0, (int)floor(($p_vit * 0.8) + ((int)$cmd['max_hp'] * 0.03)));
+				if ($reflect_dmg > 0) {
+					$new_mob_hp = max(0, $new_mob_hp - $reflect_dmg);
+					$logs[] = "🛡️ <span style='color:#8bc34a; font-weight:bold;'>[가시 갑옷]</span> 단단한 방어력으로 <b>{$cmd['mob_name']}</b>에게 <span style='color:#8bc34a;'>{$reflect_dmg}</span> 반사 피해!";
+				}
+
 				if ($new_hp <= 0) {
 					$logs[] = "💀 사령관이 쓰러졌습니다...";
 					unset($_SESSION['combat_state']);
 					$status = 'defeat';
+				} elseif ($new_mob_hp <= 0) {
+					$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 반사 피해로 쓰러졌습니다!";
+					$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
+					$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => (int)$cmd['mp'])), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp']);
+					$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
+					foreach ($reward_meta['levelup_logs'] as $levelup_log) {
+						$logs[] = $levelup_log;
+					}
+					$new_hp = (int)$reward_meta['new_hp'];
+					unset($_SESSION['combat_state']);
+					$status = 'victory';
 				} else {
 					$status = 'ongoing';
 				}
 			}
+		}
+
+		if ($reward_meta === null && $total_gold_gain > 0) {
+			$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($total_gold_gain, $uid));
 		}
 
 		if ($status === 'victory' || $status === 'defeat') {
@@ -1133,8 +1172,8 @@ function handle_combat(PDO $pdo) {
 			'max_mp' => $reward_meta ? (int)$reward_meta['max_mp'] : (int)$cmd['max_mp'],
 			'mob_hp' => $new_mob_hp,
 			'mob_max_hp' => (int)$cmd['mob_max_hp'],
-			'new_gold' => $reward_meta ? (int)$reward_meta['new_gold'] : ((int)$cmd['gold'] + (($new_mob_hp > 0) ? (int)$total_gold_gain : 0)),
-			'reward_gold' => $reward_meta ? (int)$reward_meta['reward_gold'] : (($new_mob_hp > 0) ? (int)$total_gold_gain : 0),
+			'new_gold' => $reward_meta ? (int)$reward_meta['new_gold'] : ((int)$cmd['gold'] + (int)$total_gold_gain),
+			'reward_gold' => $reward_meta ? (int)$reward_meta['reward_gold'] : (int)$total_gold_gain,
 			'reward_exp' => $reward_meta ? (int)$reward_meta['reward_exp'] : 0,
 			'new_level' => $reward_meta ? (int)$reward_meta['new_level'] : (int)$cmd['level'],
 			'new_exp' => $reward_meta ? (int)$reward_meta['new_exp'] : (int)$cmd['exp'],
@@ -1687,13 +1726,13 @@ function handle_synthesize(PDO $pdo) {
 		if (empty($pool)) throw new Exception("다음 등급({$next_rank})에 해당하는 영웅이 없습니다.");
 		$new_hero_name = $pool[array_rand($pool)];
 
-		$chk = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? FOR UPDATE");
+		$chk = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? AND is_equipped = 0 AND is_on_expedition = 0 FOR UPDATE");
 		$chk->execute(array($uid, $new_hero_name));
 		$exists = $chk->fetch();
 		if ($exists) $pdo->prepare("UPDATE tb_heroes SET quantity = quantity + 1 WHERE inv_id = ?")->execute(array($exists['inv_id']));
 		else {
 			$lore = isset($hero_data[$new_hero_name]['hero_lore']) ? $hero_data[$new_hero_name]['hero_lore'] : '';
-			$pdo->prepare("INSERT INTO tb_heroes (uid, hero_rank, hero_name, quantity, level, hero_lore) VALUES (?, ?, ?, 1, 1, ?)")->execute(array($uid, $next_rank, $new_hero_name, $lore));
+			$pdo->prepare("INSERT INTO tb_heroes (uid, hero_rank, hero_name, quantity, level, hero_lore, is_equipped, is_on_expedition) VALUES (?, ?, ?, 1, 1, ?, 0, 0)")->execute(array($uid, $next_rank, $new_hero_name, $lore));
 		}
 		$pdo->prepare("INSERT IGNORE INTO tb_collection (uid, hero_name) VALUES (?, ?)")->execute(array($uid, $new_hero_name));
 
@@ -1706,8 +1745,10 @@ function handle_synthesize(PDO $pdo) {
 		$gold_st->execute(array($uid));
 		$current_gold = (int)$gold_st->fetchColumn();
 
+		$msg = "🧬 <b>{$hero_name}</b> 3마리를 합성하여 <span style='color:#ffeb3b; font-weight:bold;'>[{$next_rank}] {$new_hero_name}</span> 획득! <span style='color:#80cbc4;'>[대기 상태 지급]</span>";
+		$trace_msg = "🧬 합성 완료: {$hero_name} x3 -> [{$next_rank}] {$new_hero_name} (대기 상태 지급)";
+		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $trace_msg));
 		$pdo->commit();
-		$msg = "🧬 <b>{$hero_name}</b> 3마리를 합성하여 <span style='color:#ffeb3b; font-weight:bold;'>[{$next_rank}] {$new_hero_name}</span> 획득!";
 		echo json_encode(array('status'=>'success','msg'=>$msg,'new_rank'=>$next_rank,'new_hero_name'=>$new_hero_name,'deck_html'=>$deck_html,'inv_html'=>$inv_html,'deck_count'=>$deck_count,'new_gold'=>$current_gold));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
@@ -2127,14 +2168,14 @@ function handle_combine(PDO $pdo) {
 
 			$new_name = $target_name;
 
-			$chk = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? FOR UPDATE");
+			$chk = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? AND is_equipped = 0 AND is_on_expedition = 0 FOR UPDATE");
 			$chk->execute(array($uid, $new_name));
 			$ex = $chk->fetch();
 			if ($ex) $pdo->prepare("UPDATE tb_heroes SET quantity = quantity + 1 WHERE inv_id = ?")->execute(array($ex['inv_id']));
 			else {
 				$rank = isset($hero_data[$new_name]['rank']) ? $hero_data[$new_name]['rank'] : '신화';
 				$lore = isset($hero_data[$new_name]['hero_lore']) ? $hero_data[$new_name]['hero_lore'] : '';
-				$pdo->prepare("INSERT INTO tb_heroes (uid, hero_name, hero_rank, quantity, hero_lore, level) VALUES (?, ?, ?, 1, ?, 1)")->execute(array($uid, $new_name, $rank, $lore));
+				$pdo->prepare("INSERT INTO tb_heroes (uid, hero_name, hero_rank, quantity, hero_lore, level, is_equipped, is_on_expedition) VALUES (?, ?, ?, 1, ?, 1, 0, 0)")->execute(array($uid, $new_name, $rank, $lore));
 			}
 			$pdo->prepare("INSERT IGNORE INTO tb_collection (uid, hero_name) VALUES (?, ?)")->execute(array($uid, $new_name));
 			$pdo->commit();
@@ -2165,14 +2206,14 @@ function handle_combine(PDO $pdo) {
 			if ((int)$src['quantity'] > 1) $pdo->prepare("UPDATE tb_heroes SET quantity = quantity - 1 WHERE inv_id = ?")->execute(array($src['inv_id']));
 			else $pdo->prepare("DELETE FROM tb_heroes WHERE inv_id = ?")->execute(array($src['inv_id']));
 
-			$chk = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? FOR UPDATE");
+			$chk = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? AND is_equipped = 0 AND is_on_expedition = 0 FOR UPDATE");
 			$chk->execute(array($uid, $evolved_name));
 			$ex = $chk->fetch();
 			if ($ex) $pdo->prepare("UPDATE tb_heroes SET quantity = quantity + 1 WHERE inv_id = ?")->execute(array($ex['inv_id']));
 			else {
 				$rank = isset($hero_data[$evolved_name]['rank']) ? $hero_data[$evolved_name]['rank'] : '불멸';
 				$lore = isset($hero_data[$evolved_name]['hero_lore']) ? $hero_data[$evolved_name]['hero_lore'] : '';
-				$pdo->prepare("INSERT INTO tb_heroes (uid, hero_name, hero_rank, quantity, hero_lore, level) VALUES (?, ?, ?, 1, ?, 1)")->execute(array($uid, $evolved_name, $rank, $lore));
+				$pdo->prepare("INSERT INTO tb_heroes (uid, hero_name, hero_rank, quantity, hero_lore, level, is_equipped, is_on_expedition) VALUES (?, ?, ?, 1, ?, 1, 0, 0)")->execute(array($uid, $evolved_name, $rank, $lore));
 			}
 			$pdo->prepare("INSERT IGNORE INTO tb_collection (uid, hero_name) VALUES (?, ?)")->execute(array($uid, $evolved_name));
 			$pdo->commit();
