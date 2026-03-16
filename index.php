@@ -195,7 +195,7 @@ if ($commander_stat_max > $commander_stat_min) {
 
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:8px; background:#1a1a1a; border-radius:4px; border:1px solid #333;">
             <span style="color:#aaa; font-size:0.9rem;">🚩 최고 도달</span>
-            <span style="color:#fff; font-weight:bold;"><?= $commander['max_floor'] ?? 1 ?>층</span>
+            <span id="max-floor-display" style="color:#fff; font-weight:bold;"><?= $commander['max_floor'] ?? 1 ?>층</span>
         </div>
 
         <div style="margin-bottom: 25px; padding: 10px; background: #222; border-radius: 4px; color: #ffd700; font-weight: bold; text-align: center;">💰 골드: <span id="gold-display"><?= number_format($commander['gold']) ?></span> G</div>

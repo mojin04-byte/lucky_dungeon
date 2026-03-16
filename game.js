@@ -165,6 +165,35 @@ function updateExpBar(level, exp, expToNext) {
     document.getElementById('exp-bar').style.width = (safeExp / safeMax * 100) + '%';
 }
 
+function parseFloorNumber(value) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return Math.max(0, Math.floor(numeric));
+    const match = String(value || '').match(/\d+/);
+    return match ? Number(match[0]) : 0;
+}
+
+function updateFloorDisplay(newFloor, newMaxFloor) {
+    const floorEl = document.getElementById('floor-display');
+    const maxFloorEl = document.getElementById('max-floor-display');
+    const parsedNewFloor = parseFloorNumber(newFloor);
+
+    if (floorEl && parsedNewFloor > 0) {
+        floorEl.innerText = String(parsedNewFloor);
+    }
+
+    if (!maxFloorEl) return;
+
+    const currentMax = parseFloorNumber(maxFloorEl.innerText);
+    const candidateMax = (newMaxFloor !== undefined && newMaxFloor !== null)
+        ? parseFloorNumber(newMaxFloor)
+        : parsedNewFloor;
+    const nextMax = Math.max(currentMax, candidateMax);
+
+    if (nextMax > 0) {
+        maxFloorEl.innerText = `${nextMax}층`;
+    }
+}
+
 function applyRewardUi(data) {
     if (!data) return;
 
@@ -840,7 +869,7 @@ async function sendAction(actionType) {
             if (actionType === 'action') {
                 if (data.story_event) showStoryModal(data.story_event);
                 if (data.status === 'encounter' || data.status === 'safe') {
-                    document.getElementById('floor-display').innerText = data.new_floor;
+                    updateFloorDisplay(data.new_floor, data.new_max_floor);
                     if (data.status === 'encounter') {
                         addLog(`⚠️ 전투 대상 확인: <b>[${data.mob_name}]</b> (HP ${data.mob_max_hp})`, true);
                     }
@@ -899,7 +928,7 @@ async function sendAction(actionType) {
                         shouldRescheduleAutomation = true;
                     }
                     } else if (data.status === 'auto_advance') {
-                        if (data.new_floor !== undefined) document.getElementById('floor-display').innerText = data.new_floor;
+                        if (data.new_floor !== undefined) updateFloorDisplay(data.new_floor, data.new_max_floor);
                         updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
                         if (data.msg) addLog(data.msg, true);
                         shouldRescheduleAutomation = true;
@@ -930,7 +959,7 @@ async function sendAction(actionType) {
             } else if (actionType === 'next_floor') {
                 if (data.status === 'success' || data.status === 'encounter') {
                     if (data.new_floor !== undefined) {
-                        document.getElementById('floor-display').innerText = data.new_floor;
+                        updateFloorDisplay(data.new_floor, data.new_max_floor);
                     }
                     if (data.new_hp !== undefined && data.max_hp !== undefined && data.new_mp !== undefined && data.max_mp !== undefined) {
                         updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
@@ -963,7 +992,7 @@ async function revive() {
     if (data && data.status === 'success') {
         window.isDead = false;
         addLog(data.log, true);
-        document.getElementById('floor-display').innerText = '1';
+        updateFloorDisplay(1);
         updatePlayerBars(data.max_hp, data.max_hp, data.max_mp, data.max_mp);
         exitToExploreState();
         toggleEquip(0, -1);

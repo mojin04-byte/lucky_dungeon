@@ -481,6 +481,7 @@ function apply_commander_rewards(PDO $pdo, $uid, $cmd_state, $gold_gain, $exp_ga
 				$exp_gain = (int)floor($exp_gain * 0.5);
 			}
 		}
+		$exp_gain = (int)floor($exp_gain * 0.5);
 		$progress = apply_commander_exp_gain($pdo, $uid, $cmd_state, $exp_gain);
 	} else {
 		$progress = array(
@@ -1912,7 +1913,7 @@ function handle_auto_explore_status(PDO $pdo) {
 	app_log('handle_auto_explore_status.start');
 	$uid = get_uid_or_fail();
 	try {
-		$stmt = $pdo->prepare("SELECT auto_explore_start_time, current_floor FROM tb_commanders WHERE uid = ?");
+		$stmt = $pdo->prepare("SELECT auto_explore_start_time, current_floor, level FROM tb_commanders WHERE uid = ?");
 		$stmt->execute(array($uid));
 		$cmd = $stmt->fetch();
 
@@ -1928,6 +1929,7 @@ function handle_auto_explore_status(PDO $pdo) {
 			if ($ovr >= 5) {
 				$exp = (int)floor($exp * 0.5);
 			}
+			$exp = (int)floor($exp * 0.5);
 			echo json_encode(array('status' => 'exploring', 'elapsed_minutes' => $minutes, 'rewards' => array('gold' => $gold, 'exp' => $exp)));
 		} else {
 			echo json_encode(array('status' => 'not_exploring'));
@@ -1968,6 +1970,7 @@ function handle_auto_explore_claim(PDO $pdo) {
 		if ($ovr >= 5) {
 			$exp = (int)floor($exp * 0.5);
 		}
+		$exp = (int)floor($exp * 0.5);
 		$pdo->prepare("UPDATE tb_commanders SET gold = gold + ?, auto_explore_start_time = NULL WHERE uid = ?")->execute(array($gold, $uid));
 		$prog = apply_commander_exp_gain($pdo, $uid, $cmd, $exp);
 		$log = "🏕️ <b>[자동 탐험 종료]</b> {$minutes}분 탐험. <span style='color:#ffd700;'>{$gold}G</span>, <span style='color:#b388ff;'>{$exp}XP</span> 획득!";
