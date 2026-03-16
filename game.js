@@ -155,7 +155,7 @@ function toPlainLogText(message) {
     return (tmp.textContent || tmp.innerText || '').trim();
 }
 
-async function typeText(targetEl, text, delayMs = 12) {
+async function typeText(targetEl, text, delayMs = 8) {
     const chars = Array.from(String(text || ''));
     for (const ch of chars) {
         targetEl.textContent += ch;
@@ -189,7 +189,7 @@ async function renderTurnScriptBlock(targetEl, data) {
         textEl.textContent += '\n';
         const logBox = document.getElementById('game-log');
         if (logBox) logBox.scrollTop = logBox.scrollHeight;
-        await wait(35);
+        await wait(23);
     }
 }
 
@@ -211,7 +211,7 @@ async function addTurnDamageBreakdown(data) {
     const statusLines = getStatusEffectLines(data);
     for (const line of damageLines.concat(statusLines)) {
         await addTypedLogLine(line, true);
-        await wait(30);
+        await wait(20);
     }
 }
 
@@ -404,38 +404,52 @@ async function doCombatTurn() {
                     streamLog.innerHTML = "<span class='turn-script-header' style='color:#ff5252; font-weight:bold;'></span><br><span class='turn-script-lines'></span><span class='stream-text'></span>";
                     logBox.appendChild(streamLog);
 
-                    const headerEl = streamLog.querySelector('.turn-script-header');
-                    if (headerEl) {
-                        headerEl.textContent = '';
-                        await typeText(headerEl, '[전투 스크립트 ✨]', 11);
-                    }
-
-                    await renderTurnScriptBlock(streamLog, data);
-
-                    logBox.scrollTop = logBox.scrollHeight;
                     const textSpan = streamLog.querySelector('.stream-text');
                     if (textSpan) textSpan.style.whiteSpace = 'pre-wrap';
 
+                    // 턴 스크립트 표시와 동시에 SSE 백그라운드 프리페치 시작
+                    let sseBuffer = '';
+                    let sseLogAppends = [];
+                    let sseDone = false;
                     const source = new EventSource('api.php?action=stream_combat_ai');
                     source.onmessage = function(event) {
-                        if (event.data === '[DONE]') {
-                            source.close();
-                            isProcessingTurn = false;
-                            if (data.status === 'victory') { exitToExploreState(); toggleEquip(0, -1); } 
-                            else if (data.status === 'defeat') { enterDeadState(); } 
-                            else if (isAutoMode) { combatTimer = setTimeout(doCombatTurn, 500); }
-                            return;
+                        if (event.data === '[DONE]') { source.close(); sseDone = true; return; }
+                        try {
+                            const chunk = JSON.parse(event.data);
+                            if (chunk.text) sseBuffer += chunk.text;
+                            if (chunk.log_append) sseLogAppends.push(chunk.log_append);
+                        } catch(e) {}
+                    };
+                    source.onerror = function() { source.close(); sseDone = true; };
+
+                    // 턴 스크립트(데미지) 애니메이션 출력
+                    const headerEl = streamLog.querySelector('.turn-script-header');
+                    if (headerEl) {
+                        headerEl.textContent = '';
+                        await typeText(headerEl, '[전투 스크립트 ✨]', 7);
+                    }
+                    await renderTurnScriptBlock(streamLog, data);
+                    logBox.scrollTop = logBox.scrollHeight;
+
+                    // 턴 스크립트 완료 후 버퍼된 SSE 내용을 즉시 이어붙이고, 미완료면 폴링 대기
+                    let displayedIdx = 0;
+                    while (!sseDone || displayedIdx < sseBuffer.length) {
+                        if (displayedIdx < sseBuffer.length) {
+                            if (textSpan) textSpan.textContent += sseBuffer.slice(displayedIdx);
+                            displayedIdx = sseBuffer.length;
+                            while (sseLogAppends.length > 0) {
+                                streamLog.innerHTML += '<br>' + sseLogAppends.shift();
+                            }
+                            logBox.scrollTop = logBox.scrollHeight;
                         }
-                        const chunk = JSON.parse(event.data);
-                        if (chunk.text) textSpan.textContent += chunk.text;
-                        if (chunk.log_append) streamLog.innerHTML += "<br>" + chunk.log_append;
-                        logBox.scrollTop = logBox.scrollHeight;
-                    };
-                    source.onerror = function() {
-                        source.close();
-                        isProcessingTurn = false;
-                    };
-                    return; // SSE가 끝날 때까지 대기
+                        if (!sseDone) await wait(20);
+                    }
+
+                    isProcessingTurn = false;
+                    if (data.status === 'victory') { exitToExploreState(); toggleEquip(0, -1); }
+                    else if (data.status === 'defeat') { enterDeadState(); }
+                    else if (isAutoMode) { combatTimer = setTimeout(doCombatTurn, 500); }
+                    return; // 완료
                 } else {
                     await addTurnDamageBreakdown(data);
                     if (Array.isArray(data.logs)) {
