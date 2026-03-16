@@ -898,7 +898,12 @@ async function sendAction(actionType) {
                         if (data.status === 'encounter') enterEncounterState(data.mob_name, data.mob_max_hp);
                         shouldRescheduleAutomation = true;
                     }
-                } else if (data.status === 'error') {
+                    } else if (data.status === 'auto_advance') {
+                        if (data.new_floor !== undefined) document.getElementById('floor-display').innerText = data.new_floor;
+                        updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
+                        if (data.msg) addLog(data.msg, true);
+                        shouldRescheduleAutomation = true;
+                    } else if (data.status === 'error') {
                     addLog(data.msg, true);
                 }
                 } else if (actionType === 'rest' || actionType === 'summon') {

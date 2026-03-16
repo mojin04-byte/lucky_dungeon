@@ -419,12 +419,12 @@ function get_battle_reward_bundle($floor, $mob_name = '') {
 
 	return array(
 		'gold' => rand($gold_min, $gold_max) * max(1, (int)floor($safe_floor / 2)),
-		'exp' => rand($exp_min, $exp_max) * $safe_floor,
+		'exp' => (int)floor(rand($exp_min, $exp_max) * (8 + (int)floor($safe_floor / 4)) / 2),
 		'is_boss' => $is_boss
 	);
 }
 
-function apply_commander_rewards(PDO $pdo, $uid, $cmd_state, $gold_gain, $exp_gain) {
+function apply_commander_rewards(PDO $pdo, $uid, $cmd_state, $gold_gain, $exp_gain, $floor = 0) {
 	$gold_gain = max(0, (int)$gold_gain);
 	$exp_gain = max(0, (int)$exp_gain);
 	$base_gold = isset($cmd_state['gold']) ? (int)$cmd_state['gold'] : 0;
@@ -434,6 +434,11 @@ function apply_commander_rewards(PDO $pdo, $uid, $cmd_state, $gold_gain, $exp_ga
 	}
 
 	if ($exp_gain > 0) {
+		if ($floor > 0) {
+			$ovr = max(0, (int)(isset($cmd_state['level']) ? $cmd_state['level'] : 1) - (int)$floor);
+			$dim = max(0.55, 1.0 - 0.02 * $ovr);
+			$exp_gain = (int)floor($exp_gain * $dim);
+		}
 		$progress = apply_commander_exp_gain($pdo, $uid, $cmd_state, $exp_gain);
 	} else {
 		$progress = array(
@@ -751,6 +756,57 @@ function handle_action(PDO $pdo) {
 		$p_vit = (int)$cmd['stat_vit'];
 		$mp_regen = max(0, (int)floor($p_mag / 10));
 		$new_mp_common = min((int)$cmd['max_mp'], (int)$cmd['mp'] + $mp_regen);
+
+		// 오버레벨 자동 층 이동 (플레이어 레벨이 현재 층 + 5 초과 시)
+		if ((int)$cmd['level'] > $current_floor + 5) {
+			$adv_floor = $current_floor + 1;
+			$adv_max_floor = max((int)$cmd['max_floor'], $adv_floor);
+			$auto_log = "⚡ 현재 층의 난이도가 너무 낮습니다. <b>{$adv_floor}층</b>으로 자동 이동합니다.";
+			if ($adv_floor % 10 === 0) {
+				$diff = pow(2, floor(($adv_floor - 1) / 10));
+				$balance = get_floor_balance_profile($adv_floor);
+				$atk_scale = (float)$balance['atk_scale'];
+				$hp_scale = (float)$balance['hp_scale'];
+				$bosses = array('거대 고기 슬라임', '폭주 로봇', '심연의 뱀파이어', '파괴자 나하투', '고대 드래곤', '리치 왕');
+				$mob_name = '[보스] ' . $bosses[array_rand($bosses)];
+				$base_mob_hp = (40 + rand(0, 20)) * $diff * 10 * $hp_scale;
+				$mob_atk = max(1, (int)round(((8 + rand(0, 5)) * $diff) * $atk_scale));
+				$expected_turn_damage = estimate_expected_turn_damage($pdo, $uid, $cmd);
+				$target_turns = (int)$balance['boss_turns'];
+				$var_min = (int)$balance['var_min']; $var_max = (int)$balance['var_max'];
+				if ($var_min > $var_max) { $tmp = $var_min; $var_min = $var_max; $var_max = $tmp; }
+				$variance = rand($var_min, $var_max) / 100.0;
+				$floor_reference_turn_damage = max(10, (int)round($base_mob_hp / max(1, $target_turns)));
+				$effective_turn_damage = apply_adaptive_hp_diminishing($expected_turn_damage, $floor_reference_turn_damage, true);
+				$adaptive_hp = (int)round((($effective_turn_damage * $target_turns) + ($base_mob_hp * 0.12)) * $variance);
+				$min_hp = max(300, (int)floor($base_mob_hp * 0.30));
+				$mob_max_hp = max($min_hp, $adaptive_hp);
+				$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, mp = ?, is_combat = 1, mob_name = ?, mob_hp = ?, mob_max_hp = ?, mob_atk = ? WHERE uid = ?")
+					->execute(array($adv_floor, $adv_max_floor, $new_mp_common, $mob_name, $mob_max_hp, $mob_max_hp, $mob_atk, $uid));
+				$boss_log = $auto_log . " 보스 <b>{$mob_name}</b> 출현!";
+				$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $boss_log));
+				$pdo->commit();
+				echo json_encode(array(
+					'status' => 'encounter', 'stream' => false,
+					'msg' => $boss_log, 'new_floor' => $adv_floor,
+					'new_hp' => (int)$cmd['hp'], 'max_hp' => (int)$cmd['max_hp'],
+					'new_mp' => $new_mp_common, 'max_mp' => (int)$cmd['max_mp'],
+					'mob_name' => $mob_name, 'mob_max_hp' => $mob_max_hp
+				));
+				return;
+			}
+			$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, mp = ? WHERE uid = ?")
+				->execute(array($adv_floor, $adv_max_floor, $new_mp_common, $uid));
+			$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $auto_log));
+			$pdo->commit();
+			echo json_encode(array(
+				'status' => 'auto_advance', 'stream' => false,
+				'msg' => $auto_log, 'new_floor' => $adv_floor,
+				'new_hp' => (int)$cmd['hp'], 'max_hp' => (int)$cmd['max_hp'],
+				'new_mp' => $new_mp_common, 'max_mp' => (int)$cmd['max_mp']
+			));
+			return;
+		}
 
 		$event_stmt = $pdo->prepare("SELECT event_id, event_type, event_title, ai_seed, weight FROM tb_explore_events WHERE is_enabled = 1 AND ? BETWEEN min_floor AND max_floor");
 		$event_stmt->execute(array($new_floor));
@@ -1118,7 +1174,7 @@ function handle_combat(PDO $pdo) {
 			$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 쓰러졌습니다!";
 			$logs[] = "⚡ <span style='color:#ffeb3b; font-weight:bold;'>[선제 제압]</span> 반격 없이 전투를 끝냈습니다!";
 			$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
-			$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => (int)$cmd['mp'])), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp']);
+			$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => (int)$cmd['mp'])), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp'], (int)$cmd['current_floor']);
 			$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
 			foreach ($reward_meta['levelup_logs'] as $levelup_log) {
 				$logs[] = $levelup_log;
@@ -1161,7 +1217,7 @@ function handle_combat(PDO $pdo) {
 				} elseif ($new_mob_hp <= 0) {
 					$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 반사 피해로 쓰러졌습니다!";
 					$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
-					$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => (int)$cmd['mp'])), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp']);
+					$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => (int)$cmd['mp'])), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp'], (int)$cmd['current_floor']);
 					$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
 					foreach ($reward_meta['levelup_logs'] as $levelup_log) {
 						$logs[] = $levelup_log;
@@ -1559,7 +1615,7 @@ function handle_skill(PDO $pdo) {
 			if ($new_mob_hp <= 0) {
 				$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 쓰러졌습니다!";
 				$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
-				$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp']);
+				$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp'], (int)$cmd['current_floor']);
 				$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
 				foreach ($reward_meta['levelup_logs'] as $levelup_log) {
 					$logs[] = $levelup_log;
