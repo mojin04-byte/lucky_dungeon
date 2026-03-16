@@ -1,8 +1,4 @@
 <?php
-// ==================================================================
-// API 메인 진입점 (복구본)
-// ==================================================================
-
 ob_start();
 require_once 'bootstrap.php';
 ob_end_clean();
@@ -313,7 +309,8 @@ function estimate_expected_turn_damage(PDO $pdo, $uid, $cmd) {
 	foreach ($deck as $hero) {
 		$rank = isset($hero['hero_rank']) ? $hero['hero_rank'] : '일반';
 		$avg = isset($rank_avg_map[$rank]) ? (float)$rank_avg_map[$rank] : 7.5;
-		$heroes_expected += $avg * $men_mult * $expected_crit_mult;
+		$hero_count = max(1, (int)(isset($hero['equipped_count']) ? $hero['equipped_count'] : (isset($hero['quantity']) ? $hero['quantity'] : 1)));
+		$heroes_expected += $avg * $hero_count * $men_mult * $expected_crit_mult;
 	}
 
 	$expected_turn_damage = ($commander_expected + $heroes_expected) * $agi_mult;
@@ -1031,8 +1028,7 @@ function handle_combat(PDO $pdo) {
 
 					$range_map = array('일반'=>array(5,10,'#aaa'), '희귀'=>array(10,20,'#4caf50'), '영웅'=>array(18,30,'#2196f3'), '전설'=>array(28,45,'#9c27b0'), '신화'=>array(38,60,'#ff5252'), '불멸'=>array(45,75,'#ffeb3b'));
 					$r = isset($range_map[$hero['hero_rank']]) ? $range_map[$hero['hero_rank']] : array(5,10,'#8bc34a');
-					// 수량 누적 폭딜 방지: 전투는 덱 슬롯 기준으로 1개체만 타격
-					$hero_count = 1;
+					$hero_count = max(1, (int)(isset($hero['equipped_count']) ? $hero['equipped_count'] : (isset($hero['quantity']) ? $hero['quantity'] : 1)));
 					$hero_dmg = rand($r[0], $r[1]) * $hero_count;
 					$hero_dmg = (int)floor($hero_dmg * $men_mult);
 					if (in_array($hero['hero_name'], $physical_heroes, true) && $str_party_bonus_pct > 0) {
@@ -1482,7 +1478,7 @@ function handle_skill(PDO $pdo) {
 
 						$range_map = array('일반'=>array(5,10,'#aaa'), '희귀'=>array(10,20,'#4caf50'), '영웅'=>array(18,30,'#2196f3'), '전설'=>array(28,45,'#9c27b0'), '신화'=>array(38,60,'#ff5252'), '불멸'=>array(45,75,'#ffeb3b'));
 						$r = isset($range_map[$hero['hero_rank']]) ? $range_map[$hero['hero_rank']] : array(5,10,'#8bc34a');
-						$hero_count = 1;
+						$hero_count = max(1, (int)(isset($hero['equipped_count']) ? $hero['equipped_count'] : (isset($hero['quantity']) ? $hero['quantity'] : 1)));
 						$hero_dmg = rand($r[0], $r[1]) * $hero_count;
 						$hero_dmg = (int)floor($hero_dmg * $men_mult);
 						if (in_array($hero['hero_name'], $physical_heroes, true) && $str_party_bonus_pct > 0) {
