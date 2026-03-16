@@ -137,39 +137,82 @@ function getTurnDamageLines(data) {
         for (const item of details) {
             const name = String((item && item.name) || '영웅');
             const dmg = Number((item && item.damage) || 0);
-            lines.push(`${name}의 공격이 <b style='color:#ffb74d;'>${dmg}</b>의 데미지를 입혔습니다.`);
+            lines.push(`${name}의 공격이 ${dmg}의 데미지를 입혔습니다.`);
         }
         return lines;
     }
 
     const p = Number((data && data.player_dmg) || 0);
     const h = Number((data && data.hero_dmg) || 0);
-    lines.push(`사령관의 공격이 <b style='color:#ffb74d;'>${p}</b>의 데미지를 입혔습니다.`);
-    if (h > 0) lines.push(`영웅들의 공격이 <b style='color:#81d4fa;'>${h}</b>의 데미지를 입혔습니다.`);
+    lines.push(`사령관의 공격이 ${p}의 데미지를 입혔습니다.`);
+    if (h > 0) lines.push(`영웅들의 공격이 ${h}의 데미지를 입혔습니다.`);
     return lines;
+}
+
+function toPlainLogText(message) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = String(message || '');
+    return (tmp.textContent || tmp.innerText || '').trim();
+}
+
+async function typeText(targetEl, text, delayMs = 24) {
+    const chars = Array.from(String(text || ''));
+    for (const ch of chars) {
+        targetEl.textContent += ch;
+        const logBox = document.getElementById('game-log');
+        if (logBox) logBox.scrollTop = logBox.scrollHeight;
+        await wait(delayMs);
+    }
 }
 
 function getStatusEffectLines(data) {
     const lines = (data && Array.isArray(data.status_effect_logs)) ? data.status_effect_logs : [];
-    return lines.map((line) => `🧪 <span style='display:inline-block; padding:2px 8px; border-radius:10px; background:#3b1f1f; color:#ffb3b3; border:1px solid #ff5252; font-weight:bold;'>상태이상</span> <span style='color:#ffd7d7;'>${line}</span>`);
+    return lines
+        .map((line) => `🧪 [상태이상] ${toPlainLogText(line)}`)
+        .filter((line) => line.trim() !== '');
 }
 
-function renderTurnScriptBlock(targetEl, data) {
+async function renderTurnScriptBlock(targetEl, data) {
     if (!targetEl) return;
     const damageLines = getTurnDamageLines(data);
     const statusLines = getStatusEffectLines(data);
     const allLines = damageLines.concat(statusLines);
     if (allLines.length === 0) return;
 
-    const textEl = targetEl.querySelector('.stream-text');
+    const textEl = targetEl.querySelector('.turn-script-lines') || targetEl.querySelector('.stream-text');
     if (!textEl) return;
-    textEl.innerHTML = allLines.join('<br>') + '<br>';
+    textEl.textContent = '';
+    textEl.style.whiteSpace = 'pre-wrap';
+
+    for (const line of allLines) {
+        await typeText(textEl, toPlainLogText(line));
+        textEl.textContent += '\n';
+        const logBox = document.getElementById('game-log');
+        if (logBox) logBox.scrollTop = logBox.scrollHeight;
+        await wait(70);
+    }
 }
 
-function addTurnDamageBreakdown(data) {
+async function addTypedLogLine(message, isSystem = true) {
+    const plain = toPlainLogText(message);
+    if (!plain) return;
+    const logBox = document.getElementById('game-log');
+    const newLog = document.createElement('div');
+    newLog.className = 'log-entry' + (isSystem ? ' system' : '');
+    newLog.style.whiteSpace = 'pre-wrap';
+    newLog.textContent = '';
+    logBox.appendChild(newLog);
+    logBox.scrollTop = logBox.scrollHeight;
+    await typeText(newLog, plain);
+}
+
+async function addTurnDamageBreakdown(data) {
     const damageLines = getTurnDamageLines(data);
     const statusLines = getStatusEffectLines(data);
-    for (const line of damageLines.concat(statusLines)) addLog(line, true);
+    for (const line of damageLines.concat(statusLines)) {
+        await addTypedLogLine(line, true);
+        await wait(60);
+    }
 }
 
 function formatAiBadge(meta) {
@@ -360,13 +403,20 @@ async function doCombatTurn() {
                     const logBox = document.getElementById('game-log');
                     const streamLog = document.createElement('div');
                     streamLog.className = 'log-entry system';
-                    streamLog.innerHTML = "<span style='color:#ff5252; font-weight:bold;'>[전투 스크립트 ✨]</span><br><span class='stream-text'></span>";
+                    streamLog.innerHTML = "<span class='turn-script-header' style='color:#ff5252; font-weight:bold;'></span><br><span class='turn-script-lines'></span><span class='stream-text'></span>";
                     logBox.appendChild(streamLog);
 
-                    renderTurnScriptBlock(streamLog, data);
+                    const headerEl = streamLog.querySelector('.turn-script-header');
+                    if (headerEl) {
+                        headerEl.textContent = '';
+                        await typeText(headerEl, '[전투 스크립트 ✨]', 22);
+                    }
+
+                    await renderTurnScriptBlock(streamLog, data);
 
                     logBox.scrollTop = logBox.scrollHeight;
                     const textSpan = streamLog.querySelector('.stream-text');
+                    if (textSpan) textSpan.style.whiteSpace = 'pre-wrap';
 
                     const source = new EventSource('api.php?action=stream_combat_ai');
                     source.onmessage = function(event) {
@@ -379,7 +429,7 @@ async function doCombatTurn() {
                             return;
                         }
                         const chunk = JSON.parse(event.data);
-                        if (chunk.text) textSpan.innerHTML += chunk.text;
+                        if (chunk.text) textSpan.textContent += chunk.text;
                         if (chunk.log_append) streamLog.innerHTML += "<br>" + chunk.log_append;
                         logBox.scrollTop = logBox.scrollHeight;
                     };
@@ -389,7 +439,7 @@ async function doCombatTurn() {
                     };
                     return; // SSE가 끝날 때까지 대기
                 } else {
-                    addTurnDamageBreakdown(data);
+                    await addTurnDamageBreakdown(data);
                     if (Array.isArray(data.logs)) {
                         for (const log of data.logs) addLog(log);
                     }
@@ -428,9 +478,9 @@ async function sendAction(actionType) {
     try {
         // 🚨 즉각적인 피드백 로그 (서버 응답을 기다리는 동안 유저가 지루하지 않게 함)
         if (actionType === 'action') {
-            addLog('🐾 어두운 미궁 속으로 발걸음을 옮깁니다... (AI 묘사 대기 중)', true);
+            addLog('🐾 어두운 미궁 속으로 발걸음을 옮깁니다... (결과 계산 중)', true);
         } else if (actionType === 'rest') {
-            addLog('🔥 모닥불을 피울 안전한 곳을 찾습니다... (AI 묘사 대기 중)', true);
+            addLog('🔥 모닥불을 피울 안전한 곳을 찾습니다... (결과 계산 중)', true);
         } else if (actionType === 'summon') {
             addLog('✨ 차원의 틈새를 엽니다...', true);
         } else if (actionType === 'next_floor') {
@@ -458,7 +508,9 @@ async function sendAction(actionType) {
                         isStreamInProgress = true;
                         const logBox = document.getElementById('game-log');
                         const lastLog = logBox.lastElementChild;
-                        if (lastLog && lastLog.innerText.includes('AI 묘사 대기 중')) logBox.removeChild(lastLog);
+                        if (lastLog && (lastLog.innerText.includes('AI 묘사 대기 중') || lastLog.innerText.includes('결과 계산 중'))) {
+                            logBox.removeChild(lastLog);
+                        }
 
                         if (data.event_title && data.event_type) {
                             const typeLabel = formatEventTypeLabel(data.event_type);
@@ -485,7 +537,7 @@ async function sendAction(actionType) {
                             if (chunk.meta && badgeSpan) {
                                 badgeSpan.innerText = formatAiBadge(chunk.meta);
                             }
-                            if (chunk.text) textSpan.innerHTML += chunk.text;
+                            if (chunk.text) textSpan.textContent += chunk.text;
                             if (chunk.log_append) streamLog.innerHTML += "<br>" + chunk.log_append;
                             logBox.scrollTop = logBox.scrollHeight;
                         };

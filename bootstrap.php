@@ -336,3 +336,105 @@ try {
     }
     error_log("탐색 이벤트 카탈로그 마이그레이션 실패: " . $e->getMessage());
 }
+
+// ==========================================
+// 추가 마이그레이션 (탐색 이벤트 2000개 확장)
+// ==========================================
+try {
+    if (table_exists($pdo, 'tb_explore_events')) {
+        $targetEventTotal = 2000;
+        $currentTotal = (int)$pdo->query("SELECT COUNT(*) FROM tb_explore_events")->fetchColumn();
+
+        if ($currentTotal < $targetEventTotal) {
+            $need = $targetEventTotal - $currentTotal;
+            $pdo->beginTransaction();
+
+            $insert = $pdo->prepare("INSERT INTO tb_explore_events (event_code, event_type, event_title, ai_seed, weight, min_floor, max_floor, is_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, 1)");
+
+            $encounterTitles = array('적 조우', '잠복 교전', '암흑 매복', '돌발 난전', '교전 발생');
+            $goldTitles = array('골드 발견', '노획물 회수', '전리품 확보', '숨은 금화', '은닉 자금 발견');
+            $chestTitles = array('상자 발견', '봉인 상자', '비밀 보급함', '고대 보물함', '전리품 상자');
+            $trapTitles = array('함정 작동', '위험 구역', '기습 함정', '붕괴 장치', '마법 함정');
+            $manaTitles = array('마나의 샘', '마력 응축지', '회복 분출점', '신비한 샘', '푸른 균열');
+
+            $encounterSeeds = array(
+                '어둠 속에서 기척이 급격히 가까워진다. 전투 태세를 갖춰라.',
+                '금속 마찰음이 복도를 가른다. 곧 적이 들이닥친다.',
+                '차가운 살기가 목덜미를 스친다. 무기를 움켜쥔다.',
+                '발밑 그림자가 요동친다. 즉시 교전에 대비하라.',
+                '숨죽인 발소리가 포위망을 좁혀온다. 대응이 필요하다.'
+            );
+            $goldSeeds = array(
+                '균열 틈새에서 반짝이는 동전 꾸러미를 발견했다.',
+                '무너진 짐마차 잔해에서 금화를 회수했다.',
+                '먼지 낀 망토 주머니에서 골드를 확보했다.',
+                '낡은 상자 밑바닥에서 전리금을 건져 올렸다.',
+                '숨겨진 주머니를 해체해 금화를 획득했다.'
+            );
+            $chestSeeds = array(
+                '봉인된 상자가 열리며 전리품이 쏟아진다.',
+                '녹슨 잠금장치를 풀고 보물 상자를 개방했다.',
+                '비밀 보급함 내부에서 유용한 물자를 찾았다.',
+                '오래된 상자에서 골드와 회복 기운을 확보했다.',
+                '고대 상자 봉인을 해제해 보상을 획득했다.'
+            );
+            $trapSeeds = array(
+                '바닥 문양이 점등되며 함정이 작동했다.',
+                '벽면 장치가 열리며 위협이 쏟아져 나왔다.',
+                '기계식 덫이 급발진해 회피가 필요해졌다.',
+                '발판이 내려앉으며 피해 위험이 커졌다.',
+                '숨은 마법진이 활성화되어 내성이 시험받는다.'
+            );
+            $manaSeeds = array(
+                '맑은 마나 파동이 주변을 감싸며 정신이 맑아진다.',
+                '푸른 샘에서 마력이 솟구쳐 회복을 돕는다.',
+                '균열의 빛무리에서 농밀한 마나를 흡수한다.',
+                '공기 중 마나 입자가 응축되어 힘을 북돋운다.',
+                '은은한 푸른 안개가 사령관의 마력을 채운다.'
+            );
+
+            for ($i = 1; $i <= $need; $i++) {
+                $seq = $currentTotal + $i;
+                $roll = $seq % 100;
+                $type = 'encounter';
+                $titlePool = $encounterTitles;
+                $seedPool = $encounterSeeds;
+
+                if ($roll < 60) {
+                    $type = 'encounter';
+                    $titlePool = $encounterTitles;
+                    $seedPool = $encounterSeeds;
+                } elseif ($roll < 76) {
+                    $type = 'gold';
+                    $titlePool = $goldTitles;
+                    $seedPool = $goldSeeds;
+                } elseif ($roll < 88) {
+                    $type = 'chest';
+                    $titlePool = $chestTitles;
+                    $seedPool = $chestSeeds;
+                } elseif ($roll < 95) {
+                    $type = 'trap';
+                    $titlePool = $trapTitles;
+                    $seedPool = $trapSeeds;
+                } else {
+                    $type = 'mana_spring';
+                    $titlePool = $manaTitles;
+                    $seedPool = $manaSeeds;
+                }
+
+                $title = $titlePool[$seq % count($titlePool)] . ' #' . str_pad((string)$seq, 4, '0', STR_PAD_LEFT);
+                $seed = $seedPool[$seq % count($seedPool)];
+                $eventCode = 'R2K_' . str_pad((string)$seq, 6, '0', STR_PAD_LEFT);
+
+                $insert->execute(array($eventCode, $type, $title, $seed, 10, 1, 9999));
+            }
+
+            $pdo->commit();
+        }
+    }
+} catch (\PDOException $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    error_log("탐색 이벤트 2000개 확장 마이그레이션 실패: " . $e->getMessage());
+}

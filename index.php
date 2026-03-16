@@ -239,8 +239,8 @@ $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $ex
             <div class="btn" style="background: #ff9800;" onclick="useSkill('fireball')">🔥 화염구<br><span style='font-size:0.7rem;'>(MP 25)</span></div>
             <div class="btn" style="background: #2196f3;" onclick="useSkill('heal')">💚 힐<br><span style='font-size:0.7rem;'>(MP 30)</span></div>
             <div class="btn" style="background: #ffeb3b; color: #000;" onclick="useSkill('thunder_bolt')">⚡ 번개<br><span style='font-size:0.7rem;'>(MP 28)</span></div>
-            <div class="btn" style="background: #9c27b0;" onclick="useSkill('shield_up')">🛡️ 방어강화<br><span style='font-size:0.7rem;'>(MP 20)</span></div>
-            <div class="btn" style="background: #d32f2f;" onclick="useSkill('berserk')">💥 광폭화<br><span style='font-size:0.7rem;'>(MP 35)</span></div>
+            <div class="btn" style="background: #9c27b0;" onclick="useSkill('shield_up')">🛡️ 방어강화<br><span style='font-size:0.7rem;'>(MP 소모 없음)</span></div>
+            <div class="btn" style="background: #d32f2f;" onclick="useSkill('berserk')">💥 광폭화<br><span style='font-size:0.7rem;'>(HP 10% · 공격/마법 +30%)</span></div>
             <div class="btn" style="background: #555;" onclick="attemptFlee()">🏃 도망치기</div>
         </div>
 

@@ -64,16 +64,22 @@ function build_ai_prompt($source_text, $is_story = false, $mode = 'default') {
 
 	if ($mode === 'combat') {
 		$style = "한국어로 3~5문장의 전투 스크립트를 출력하세요. 공격, 반격, 상태이상, 승패를 시간순으로 간결하게 묘사하세요.";
+		$rules = "\n규칙:"
+			. "\n- 옵션/대안/후보를 나열하지 마세요."
+			. "\n- '옵션 1/2/3', 제목, 마크다운(##, **, >)을 절대 쓰지 마세요."
+			. "\n- 첫 문장은 반드시 '[전황:교전] 결과' 형식으로 시작하세요."
+			. "\n- 전투가 끝나지 않았다면 '승리/패배/처치 완료'를 단정하지 마세요."
+			. "\n- 설명 없이 최종 문장만 출력하세요.";
 	} else {
 		$style = $is_story
 			? "한국어로 2~4문장의 판타지 내레이션만 출력하세요."
 			: "한국어로 게임 로그 내레이션 1~3문장만 출력하세요.";
+		$rules = "\n규칙:"
+			. "\n- 옵션/대안/후보를 나열하지 마세요."
+			. "\n- '옵션 1/2/3', 제목, 마크다운(##, **, >)을 절대 쓰지 마세요."
+			. "\n- 첫 문장은 반드시 '[이벤트:종류] 결과' 형식으로 직관적으로 시작하세요."
+			. "\n- 설명 없이 최종 문장만 출력하세요.";
 	}
-	$rules = "\n규칙:"
-		. "\n- 옵션/대안/후보를 나열하지 마세요."
-		. "\n- '옵션 1/2/3', 제목, 마크다운(##, **, >)을 절대 쓰지 마세요."
-		. "\n- 첫 문장은 반드시 '[이벤트:종류] 결과' 형식으로 직관적으로 시작하세요."
-		. "\n- 설명 없이 최종 문장만 출력하세요.";
 	return $style . $tone_guide . $rules . "\n원문: " . $source_text;
 }
 
@@ -90,6 +96,8 @@ function normalize_ai_output($text) {
 	$t = preg_replace('/^\s*#{1,6}\s*/um', '', $t);
 	$t = str_replace(array('**', '__'), '', $t);
 	$t = preg_replace('/^\s*>\s*/um', '', $t);
+	$t = strip_tags($t);
+	$t = html_entity_decode($t, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 	$t = preg_replace('/\s+/u', ' ', $t);
 	return trim($t);
 }
@@ -161,19 +169,26 @@ function request_ai_text_with_fallback($source_text, $is_story = false, $mode = 
 	return array('text' => normalize_ai_output((string)$source_text), 'provider' => 'raw', 'model' => 'local-fallback');
 }
 
-function stream_text_as_sse($text, $sleep_us = 28000, $meta = null) {
+function stream_text_as_sse($text, $sleep_us = 28000, $meta = null, $chunk_min = 2, $chunk_max = 6) {
 	if (is_array($meta)) {
 		echo 'data: ' . json_encode(array('meta' => $meta), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
 		@ob_flush(); @flush();
 	}
+	$chunk_min = max(1, (int)$chunk_min);
+	$chunk_max = max($chunk_min, (int)$chunk_max);
 	$chars = preg_split('//u', (string)$text, -1, PREG_SPLIT_NO_EMPTY);
 	if (!$chars) $chars = array((string)$text);
 	$buffer = '';
+	$buffer_len = 0;
+	$target_len = rand($chunk_min, $chunk_max);
 	foreach ($chars as $ch) {
 		$buffer .= $ch;
-		if (strlen($buffer) >= rand(2, 6)) {
+		$buffer_len++;
+		if ($buffer_len >= $target_len) {
 			echo 'data: ' . json_encode(array('text' => $buffer), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
 			$buffer = '';
+			$buffer_len = 0;
+			$target_len = rand($chunk_min, $chunk_max);
 			@ob_flush(); @flush();
 			usleep($sleep_us);
 		}
@@ -213,6 +228,54 @@ function extract_status_effect_logs($logs) {
 		}
 	}
 	return array_values(array_unique($out));
+}
+
+function html_log_to_plain_text($html) {
+	$t = (string)$html;
+	$t = preg_replace('/<\s*br\s*\/?>/iu', "\n", $t);
+	$t = preg_replace('/<\s*\/\s*div\s*>/iu', "\n", $t);
+	$t = strip_tags($t);
+	$t = html_entity_decode($t, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+	$t = preg_replace('/[ \t]+\n/u', "\n", $t);
+	$t = preg_replace('/\n{3,}/u', "\n\n", $t);
+	return trim($t);
+}
+
+function get_player_buff_value($key) {
+	if (!isset($_SESSION['combat_state']) || !is_array($_SESSION['combat_state'])) return 0;
+	if (!isset($_SESSION['combat_state']['player_buffs']) || !is_array($_SESSION['combat_state']['player_buffs'])) return 0;
+	if (!isset($_SESSION['combat_state']['player_buffs'][$key])) return 0;
+	$buff = $_SESSION['combat_state']['player_buffs'][$key];
+	$turns = isset($buff['turns_left']) ? (int)$buff['turns_left'] : 0;
+	if ($turns <= 0) {
+		unset($_SESSION['combat_state']['player_buffs'][$key]);
+		return 0;
+	}
+	return isset($buff['value']) ? (int)$buff['value'] : 0;
+}
+
+function tick_player_buffs(&$logs, $skip_keys = array()) {
+	if (!isset($_SESSION['combat_state']) || !is_array($_SESSION['combat_state'])) return;
+	if (!isset($_SESSION['combat_state']['player_buffs']) || !is_array($_SESSION['combat_state']['player_buffs'])) return;
+	if (!is_array($skip_keys)) $skip_keys = array();
+
+	foreach (array_keys($_SESSION['combat_state']['player_buffs']) as $key) {
+		if (in_array($key, $skip_keys, true)) continue;
+		$turns = isset($_SESSION['combat_state']['player_buffs'][$key]['turns_left']) ? (int)$_SESSION['combat_state']['player_buffs'][$key]['turns_left'] : 0;
+		if ($turns <= 1) {
+			unset($_SESSION['combat_state']['player_buffs'][$key]);
+			if (is_array($logs)) {
+				if ($key === 'vit') $logs[] = "🛡️ 방어강화 효과가 사라졌습니다.";
+				if ($key === 'berserk_power') $logs[] = "🔥 광폭화 효과가 사라졌습니다.";
+			}
+		} else {
+			$_SESSION['combat_state']['player_buffs'][$key]['turns_left'] = $turns - 1;
+		}
+	}
+
+	if (empty($_SESSION['combat_state']['player_buffs'])) {
+		unset($_SESSION['combat_state']['player_buffs']);
+	}
 }
 
 function estimate_expected_turn_damage(PDO $pdo, $uid, $cmd) {
@@ -570,6 +633,15 @@ function sanitize_event_title($title) {
 	return trim($t);
 }
 
+function normalize_event_title_for_context($event_type, $title) {
+	$clean = sanitize_event_title($title);
+	if ((string)$event_type !== 'encounter') return $clean;
+	if (preg_match('/승리|완승|격파|처치|섬멸|토벌\s*완료/u', $clean)) {
+		return '교전';
+	}
+	return $clean;
+}
+
 function handle_action(PDO $pdo) {
 	app_log('handle_action.start');
 	$uid = get_uid_or_fail();
@@ -618,7 +690,8 @@ function handle_action(PDO $pdo) {
 		}
 
 		$event_type = isset($selected_event['event_type']) ? (string)$selected_event['event_type'] : 'encounter';
-		$event_title = isset($selected_event['event_title']) ? sanitize_event_title($selected_event['event_title']) : '알 수 없는 사건';
+		$event_title_raw = isset($selected_event['event_title']) ? (string)$selected_event['event_title'] : '알 수 없는 사건';
+		$event_title = normalize_event_title_for_context($event_type, $event_title_raw);
 		$event_seed = isset($selected_event['ai_seed']) ? (string)$selected_event['ai_seed'] : '';
 
 		$resp = array('status' => 'safe');
@@ -724,8 +797,8 @@ function handle_action(PDO $pdo) {
 		}
 
 		$resp['log'] = $log;
-		$resp['stream'] = true;
-		$_SESSION['ai_stream_text'] = trim("[이벤트:{$event_title}] " . $log);
+		$resp['stream'] = false;
+		unset($_SESSION['ai_stream_text']);
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
 		$pdo->commit();
 		echo json_encode($resp);
@@ -810,6 +883,9 @@ function handle_combat(PDO $pdo) {
 		$p_luk = (int)$cmd['stat_luk'];
 		$p_men = (int)$cmd['stat_men'];
 		$p_vit = (int)$cmd['stat_vit'];
+		$buff_vit = get_player_buff_value('vit');
+		if ($buff_vit > 0) $p_vit += $buff_vit;
+		$berserk_bonus_pct = max(0, get_player_buff_value('berserk_power'));
 
 		$relic_stmt = $pdo->prepare("SELECT atk_bonus_percent FROM tb_relics WHERE uid = ? LIMIT 1");
 		$relic_stmt->execute(array($uid));
@@ -830,6 +906,7 @@ function handle_combat(PDO $pdo) {
 		// 공격 버튼 기본 피해는 STR 중심으로 계산
 		$player_base = max(1, (int)floor(($p_str * 1.8) + rand(4, 12)));
 		if ($relic_atk_bonus > 0) $player_base = (int)floor($player_base * (1 + ($relic_atk_bonus / 100)));
+		if ($berserk_bonus_pct > 0) $player_base = (int)floor($player_base * (1 + ($berserk_bonus_pct / 100)));
 		$is_crit = (rand(1, 100) <= $crit_chance);
 		$player_dmg = $is_crit ? floor($player_base * $crit_mult) : $player_base;
 		$turn_damage_details[] = array('name' => '사령관', 'damage' => (int)$player_dmg);
@@ -932,14 +1009,16 @@ function handle_combat(PDO $pdo) {
 			$pdo->prepare("UPDATE tb_commanders SET hp = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")
 				->execute(array($new_hp, $uid));
 		} else {
+			tick_player_buffs($logs);
 			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mob_hp = ? WHERE uid = ?")->execute(array($new_hp, $new_mob_hp, $uid));
 		}
 
 		$final_log = implode('<br>', $logs);
 		$status_effect_logs = extract_status_effect_logs($logs);
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $final_log));
-		$_SESSION['ai_stream_text'] = strip_tags($final_log);
-		$_SESSION['combat_stream_text'] = strip_tags($final_log);
+		$combat_stream_seed = html_log_to_plain_text($final_log);
+		$_SESSION['ai_stream_text'] = $combat_stream_seed;
+		$_SESSION['combat_stream_text'] = $combat_stream_seed;
 		$pdo->commit();
 
 		echo json_encode(array(
@@ -1175,8 +1254,8 @@ function handle_skill(PDO $pdo) {
 		'fireball' => array('name' => '화염구', 'cost' => 25, 'type' => 'damage', 'value' => 80),
 		'heal' => array('name' => '힐', 'cost' => 30, 'type' => 'heal', 'value' => 50),
 		'thunder_bolt' => array('name' => '번개', 'cost' => 28, 'type' => 'damage', 'value' => 100),
-		'shield_up' => array('name' => '방어강화', 'cost' => 20, 'type' => 'buff', 'effect' => 'vit', 'value' => 10, 'duration' => 3),
-		'berserk' => array('name' => '광폭화', 'cost' => 35, 'type' => 'buff', 'effect' => 'str', 'value' => 15, 'duration' => 3),
+		'shield_up' => array('name' => '방어강화', 'resource' => 'none', 'type' => 'buff', 'effect' => 'vit', 'value' => 10, 'duration' => 3),
+		'berserk' => array('name' => '광폭화', 'resource' => 'hp_percent', 'cost_percent' => 10, 'type' => 'buff', 'effect' => 'berserk_power', 'value' => 30, 'duration' => 3),
 	);
 	if (!isset($skills[$skill_id])) { json_error('알 수 없는 스킬입니다.'); return; }
 	$skill = $skills[$skill_id];
@@ -1188,12 +1267,25 @@ function handle_skill(PDO $pdo) {
 		$cmd = $st->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
 		if ((int)$cmd['is_combat'] === 0) throw new Exception('전투 중에만 스킬 사용 가능');
-		if ((int)$cmd['mp'] < (int)$skill['cost']) throw new Exception('MP가 부족합니다.');
 
-		$new_mp = (int)$cmd['mp'] - (int)$skill['cost'];
+		$new_mp = (int)$cmd['mp'];
 		$new_hp = (int)$cmd['hp'];
 		$new_mob_hp = (int)$cmd['mob_hp'];
-		$logs = array("🔮 <b>[{$skill['name']}]</b> 시전! (MP -{$skill['cost']})");
+		$resource = isset($skill['resource']) ? (string)$skill['resource'] : 'mp';
+		$cost_text = '소모 없음';
+		if ($resource === 'mp') {
+			$mp_cost = max(0, (int)(isset($skill['cost']) ? $skill['cost'] : 0));
+			if ($new_mp < $mp_cost) throw new Exception('MP가 부족합니다.');
+			$new_mp -= $mp_cost;
+			$cost_text = "MP -{$mp_cost}";
+		} elseif ($resource === 'hp_percent') {
+			$hp_cost_percent = max(1, (int)(isset($skill['cost_percent']) ? $skill['cost_percent'] : 10));
+			$hp_cost = max(1, (int)floor($new_hp * ($hp_cost_percent / 100)));
+			if ($new_hp <= $hp_cost) throw new Exception('HP가 부족합니다.');
+			$new_hp -= $hp_cost;
+			$cost_text = "HP -{$hp_cost}";
+		}
+		$logs = array("🔮 <b>[{$skill['name']}]</b> 시전! ({$cost_text})");
 		$mag_amp = 1 + ((int)$cmd['stat_mag'] * 0.01);
 		if (!isset($_SESSION['combat_state'])) $_SESSION['combat_state'] = array('hero_attack_counts' => array(), 'enemy_debuffs' => array());
 
@@ -1202,6 +1294,8 @@ function handle_skill(PDO $pdo) {
 		$p_agi = (int)$cmd['stat_agi'];
 		$p_luk = (int)$cmd['stat_luk'];
 		$p_men = (int)$cmd['stat_men'];
+		$berserk_bonus_pct = max(0, get_player_buff_value('berserk_power'));
+		$newly_applied_buffs = array();
 		$crit_mult = 1.5 + ($p_luk * 0.01);
 		$men_mult = 1 + ($p_men * 0.005);
 		$agi_double_chance = floor($p_agi / 5);
@@ -1213,6 +1307,7 @@ function handle_skill(PDO $pdo) {
 
 		if ($skill['type'] === 'damage') {
 			$damage = (int)floor(((int)$skill['value'] + floor((int)$cmd['stat_mag'] * 1.5)) * $mag_amp);
+			if ($berserk_bonus_pct > 0) $damage = (int)floor($damage * (1 + ($berserk_bonus_pct / 100)));
 			$new_mob_hp = max(0, $new_mob_hp - $damage);
 			$logs[] = "💥 몬스터에게 <span style='color:red;'>{$damage}</span> 피해.";
 		} elseif ($skill['type'] === 'heal') {
@@ -1221,8 +1316,16 @@ function handle_skill(PDO $pdo) {
 			$logs[] = "💚 체력을 <span style='color:lightgreen;'>{$heal}</span> 회복.";
 		} else {
 			if (!isset($_SESSION['combat_state']['player_buffs'])) $_SESSION['combat_state']['player_buffs'] = array();
-			$_SESSION['combat_state']['player_buffs'][$skill['effect']] = array('value' => (int)$skill['value'], 'turns_left' => (int)$skill['duration']);
-			$logs[] = '✨ 신체 능력이 일시적으로 강화됩니다!';
+			$buff_key = (string)$skill['effect'];
+			$_SESSION['combat_state']['player_buffs'][$buff_key] = array('value' => (int)$skill['value'], 'turns_left' => (int)$skill['duration']);
+			$newly_applied_buffs[] = $buff_key;
+			if ($buff_key === 'vit') {
+				$logs[] = "🛡️ <b>방어강화</b> 발동! {$skill['duration']}턴 동안 방어가 강화됩니다.";
+			} elseif ($buff_key === 'berserk_power') {
+				$logs[] = "🔥 <b>광폭화</b> 발동! {$skill['duration']}턴 동안 공격/마법 공격 피해 <b>+{$skill['value']}%</b>.";
+			} else {
+				$logs[] = '✨ 신체 능력이 일시적으로 강화됩니다!';
+			}
 		}
 
 		if ($new_mob_hp > 0) {
@@ -1287,6 +1390,7 @@ function handle_skill(PDO $pdo) {
 				->execute(array($new_hp, $new_mp, $uid));
 			$new_mob_hp = 0;
 		} else {
+			tick_player_buffs($logs, $newly_applied_buffs);
 			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, mob_hp = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $new_mob_hp, $uid));
 		}
 		$pdo->commit();
@@ -2129,7 +2233,7 @@ function handle_stream_combat_ai(PDO $pdo) {
 	$ai = request_ai_text_with_fallback($combat_seed, false, 'combat');
 	$ai_text = is_array($ai) ? (string)$ai['text'] : (string)$ai;
 	$meta = is_array($ai) ? array('provider' => $ai['provider'], 'model' => $ai['model']) : array('provider' => 'raw', 'model' => 'unknown');
-	stream_text_as_sse($ai_text, 26000, $meta);
+	stream_text_as_sse($ai_text, 22000, $meta, 1, 1);
 	echo "data: [DONE]\n\n";
 	@ob_flush(); @flush();
 	exit;
