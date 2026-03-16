@@ -96,8 +96,9 @@ function utf8_len($text) {
 
 function ensure_intro_story_quality($text, $uid_label = '', $commander_id = '') {
 	$t = trim((string)$text);
-	if ($t === '') {
-		$t = "[이벤트:서막] 결과 무너진 회랑 위로 검은 성화가 되살아나며 봉인의 문양이 피빛으로 타올랐다.";
+	if ($t === '' || stripos($t, '다음 배경 설정을 바탕으로') !== false) {
+		$t = "서사 생성 실패: AI 응답이 비어 있거나 생성에 실패했습니다.\n"
+			. "세렌디피티 길드의 어둠 속에서 사령관 아이디 {$commander_id}와 식별 번호 {$uid_label}가 운명의 제단에 새겨진다. 잿빛 안개와 검은 성화가 회랑을 휘감고, 고대의 종이 울린다. 당신은 심연으로 첫 발을 내딛으며, 혼돈의 미궁이 장대한 어둠으로 당신을 맞이한다.";
 	}
 
 	if (strpos($t, '세렌디피티 길드') === false) {
@@ -1239,7 +1240,7 @@ function handle_combat(PDO $pdo) {
 				$logs[] = "🛡️ <span style='color:orange; font-weight:bold;'>[VIT 특성 발동]</span> 사령관이 공격을 막아냈습니다!";
 				$status = 'ongoing';
 			} else {
-				$mob_dmg = max(1, (int)$cmd['mob_atk'] - floor($p_vit / 2));
+				$mob_dmg = max(1, ((int)$cmd['mob_atk'] - floor($p_vit / 2)) * 2);
 				$incoming_damage = (int)$mob_dmg;
 				$incoming_damage_source = (string)$cmd['mob_name'];
 				$logs[] = "🩸 <b>{$cmd['mob_name']}</b>의 반격! <span style='color:#ff5252;'>{$mob_dmg}</span> 피해.";

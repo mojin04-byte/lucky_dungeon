@@ -255,7 +255,7 @@ define('GEMINI_API_KEY', getenv('GEMINI_API_KEY'));
 
 // Gemini API URL
 $gemini_key = getenv('GEMINI_API_KEY');
-$gemini_model = getenv('GEMINI_MODEL') ?: 'gemini-2.5-flash-lite';
+$gemini_model = getenv('GEMINI_MODEL') ?: 'GEMINI 3.1 FLASH LITE';
 define('GEMINI_API_URL', "https://generativelanguage.googleapis.com/v1beta/models/{$gemini_model}:generateContent?key={$gemini_key}");
 
 // ==========================================
