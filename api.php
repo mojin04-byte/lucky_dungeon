@@ -66,6 +66,14 @@ function build_ai_prompt($source_text, $is_story = false, $mode = 'default') {
 			. "\n- 첫 문장은 반드시 '[전황:교전] 결과' 형식으로 시작하세요."
 			. "\n- 전투가 끝나지 않았다면 '승리/패배/처치 완료'를 단정하지 마세요."
 			. "\n- 설명 없이 최종 문장만 출력하세요.";
+	} elseif ($mode === 'intro_story') {
+		$style = "한국어로 최소 100자 이상, 6~10문장의 장대한 다크 판타지 오프닝 내레이션을 출력하세요.";
+		$rules = "\n규칙:"
+			. "\n- 옵션/대안/후보를 나열하지 마세요."
+			. "\n- '옵션 1/2/3', 제목, 마크다운(##, **, >)을 절대 쓰지 마세요."
+			. "\n- 반드시 '세렌디피티 길드'와 사령관 아이디를 자연스럽게 포함하세요."
+			. "\n- 마지막 문장은 1층을 향해 첫 발을 내딛는 장면으로 마무리하세요."
+			. "\n- 설명 없이 최종 문장만 출력하세요.";
 	} else {
 		$style = $is_story
 			? "한국어로 2~4문장의 판타지 내레이션만 출력하세요."
@@ -77,6 +85,38 @@ function build_ai_prompt($source_text, $is_story = false, $mode = 'default') {
 			. "\n- 설명 없이 최종 문장만 출력하세요.";
 	}
 	return $style . $tone_guide . $rules . "\n원문: " . $source_text;
+}
+
+function utf8_len($text) {
+	if (function_exists('mb_strlen')) {
+		return (int)mb_strlen((string)$text, 'UTF-8');
+	}
+	return (int)strlen((string)$text);
+}
+
+function ensure_intro_story_quality($text, $uid_label = '', $commander_id = '') {
+	$t = trim((string)$text);
+	if ($t === '') {
+		$t = "[이벤트:서막] 결과 무너진 회랑 위로 검은 성화가 되살아나며 봉인의 문양이 피빛으로 타올랐다.";
+	}
+
+	if (strpos($t, '세렌디피티 길드') === false) {
+		$t .= " 세렌디피티 길드의 인장이 갈라진 제단 위에서 붉은 번개처럼 맥동했다.";
+	}
+
+	if ($commander_id !== '' && strpos($t, $commander_id) === false) {
+		$t .= " 사령관 아이디 {$commander_id}라는 이름이 저주받은 석판에 천천히 새겨졌다.";
+	}
+
+	if ($uid_label !== '' && strpos($t, $uid_label) === false) {
+		$t .= " 봉인석의 마지막 홈에는 {$uid_label}가 각인되며 운명의 계약이 완성되었다.";
+	}
+
+	if (utf8_len($t) < 100) {
+		$t .= " 잿빛 안개가 발목을 휘감는 가운데 오래된 종이 울리고, 당신은 비명을 삼킨 검은 하늘 아래 심연으로 향하는 첫 계단에 발을 올렸다.";
+	}
+
+	return trim($t);
 }
 
 function normalize_ai_output($text) {
@@ -419,7 +459,7 @@ function get_battle_reward_bundle($floor, $mob_name = '') {
 
 	return array(
 		'gold' => rand($gold_min, $gold_max) * max(1, (int)floor($safe_floor / 2)),
-		'exp' => (int)floor(rand($exp_min, $exp_max) * (8 + (int)floor($safe_floor / 4)) / 2),
+		'exp' => rand($exp_min, $exp_max) * (8 + (int)floor($safe_floor / 4)),
 		'is_boss' => $is_boss
 	);
 }
@@ -436,8 +476,9 @@ function apply_commander_rewards(PDO $pdo, $uid, $cmd_state, $gold_gain, $exp_ga
 	if ($exp_gain > 0) {
 		if ($floor > 0) {
 			$ovr = max(0, (int)(isset($cmd_state['level']) ? $cmd_state['level'] : 1) - (int)$floor);
-			$dim = max(0.55, 1.0 - 0.02 * $ovr);
-			$exp_gain = (int)floor($exp_gain * $dim);
+			if ($ovr >= 5) {
+				$exp_gain = (int)floor($exp_gain * 0.5);
+			}
 		}
 		$progress = apply_commander_exp_gain($pdo, $uid, $cmd_state, $exp_gain);
 	} else {
@@ -945,7 +986,7 @@ function handle_action(PDO $pdo) {
 				$reward_state['max_hp'] = $max_hp;
 				$reward_state['mp'] = $mp;
 				$reward_state['max_mp'] = $max_mp;
-				$reward_meta = apply_commander_rewards($pdo, $uid, $reward_state, $reward_gold, $reward_exp);
+				$reward_meta = apply_commander_rewards($pdo, $uid, $reward_state, $reward_gold, $reward_exp, $new_floor);
 				$resp = array_merge($resp, $reward_meta);
 			}
 		}
@@ -1882,6 +1923,10 @@ function handle_auto_explore_status(PDO $pdo) {
 			$bonus = max(1, floor((int)$cmd['current_floor'] / 10));
 			$gold = $minutes * 10 * $bonus;
 			$exp = $minutes * 5 * $bonus;
+			$ovr = max(0, (int)$cmd['level'] - (int)$cmd['current_floor']);
+			if ($ovr >= 5) {
+				$exp = (int)floor($exp * 0.5);
+			}
 			echo json_encode(array('status' => 'exploring', 'elapsed_minutes' => $minutes, 'rewards' => array('gold' => $gold, 'exp' => $exp)));
 		} else {
 			echo json_encode(array('status' => 'not_exploring'));
@@ -1918,6 +1963,10 @@ function handle_auto_explore_claim(PDO $pdo) {
 		$bonus = max(1, floor((int)$cmd['current_floor'] / 10));
 		$gold = $minutes * 10 * $bonus;
 		$exp = $minutes * 5 * $bonus;
+		$ovr = max(0, (int)$cmd['level'] - (int)$cmd['current_floor']);
+		if ($ovr >= 5) {
+			$exp = (int)floor($exp * 0.5);
+		}
 		$pdo->prepare("UPDATE tb_commanders SET gold = gold + ?, auto_explore_start_time = NULL WHERE uid = ?")->execute(array($gold, $uid));
 		$prog = apply_commander_exp_gain($pdo, $uid, $cmd, $exp);
 		$log = "🏕️ <b>[자동 탐험 종료]</b> {$minutes}분 탐험. <span style='color:#ffd700;'>{$gold}G</span>, <span style='color:#b388ff;'>{$exp}XP</span> 획득!";
@@ -2524,9 +2573,19 @@ function handle_stream_story_ai(PDO $pdo) {
 	header('Cache-Control: no-cache');
 	header('Connection: keep-alive');
 	$story_seed = isset($_SESSION['story_stream_text']) ? (string)$_SESSION['story_stream_text'] : "낡은 석판의 문자가 천천히 빛나며, 잊힌 기록이 하나씩 떠오른다...";
+	$story_meta = (isset($_SESSION['story_stream_meta']) && is_array($_SESSION['story_stream_meta'])) ? $_SESSION['story_stream_meta'] : array();
 	unset($_SESSION['story_stream_text']);
-	$ai = request_ai_text_with_fallback($story_seed, true);
+	unset($_SESSION['story_stream_meta']);
+	$is_intro_story = isset($story_meta['is_intro']) && (int)$story_meta['is_intro'] === 1;
+	$story_mode = $is_intro_story ? 'intro_story' : 'default';
+	$ai = request_ai_text_with_fallback($story_seed, true, $story_mode);
 	$ai_story = is_array($ai) ? (string)$ai['text'] : (string)$ai;
+	if ($is_intro_story) {
+		$raw_uid = isset($story_meta['uid']) ? (string)$story_meta['uid'] : '';
+		$uid_label = $raw_uid !== '' ? ('UID ' . preg_replace('/[^0-9A-Za-z_-]/', '', $raw_uid)) : '';
+		$commander_id = isset($story_meta['commander_id']) ? (string)$story_meta['commander_id'] : '';
+		$ai_story = ensure_intro_story_quality($ai_story, $uid_label, $commander_id);
+	}
 	$meta = is_array($ai) ? array('provider' => $ai['provider'], 'model' => $ai['model']) : array('provider' => 'raw', 'model' => 'unknown');
 	stream_text_as_sse($ai_story, 26000, $meta);
 	echo "data: [DONE]\n\n";

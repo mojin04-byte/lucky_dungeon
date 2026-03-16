@@ -28,10 +28,16 @@ if ($background_story !== '' && $intro_story_seen === 0) {
 
     $_SESSION['story_stream_text'] = trim(
         "다음 배경 설정을 바탕으로, 게임 시작 직후 메인 팝업에서 보여줄 오프닝 서사를 작성하라. " .
-        "반드시 한국어로 작성하고, 5~8문장 분량의 스크립트형 연출로 구성하라. " .
+        "반드시 한국어로 작성하고, 100자 이상(권장 180~320자), 6~10문장의 장대한 다크 판타지 연출로 구성하라. " .
         "주인공 이름은 '{$commander['nickname']}', 직업은 '{$commander['class_type']}', 톤은 '{$tone_label}'이다. " .
-        "플레이어가 곧 1층 탐험을 시작한다는 긴장감을 담고, 마지막 문장은 한 걸음을 내딛는 장면으로 마무리하라. " .
+        "반드시 '세렌디피티 길드'를 직접 언급하고, 사령관 아이디 '{$commander['nickname']}'와 식별 번호 'UID {$uid}'를 자연스럽게 포함하라. " .
+        "플레이어가 곧 1층 탐험을 시작한다는 긴장감을 담고, 마지막 문장은 심연으로 첫 발을 내딛는 장면으로 마무리하라. " .
         "배경 서사: {$background_story}"
+    );
+    $_SESSION['story_stream_meta'] = array(
+        'is_intro' => 1,
+        'uid' => (string)$uid,
+        'commander_id' => (string)$commander['nickname']
     );
 
     $pdo->prepare("UPDATE tb_commanders SET intro_story_seen = 1 WHERE uid = ?")->execute([$uid]);
