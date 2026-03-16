@@ -483,6 +483,9 @@ if ($commander_stat_max > $commander_stat_min) {
             html += '<button class="btn" style="width:100%; background:#2196f3;" onclick="startExpedition()">파견 시작</button>';
             html += '</div>';
             listArea.innerHTML = html;
+            if (typeof applyButtonTooltips === 'function') {
+                applyButtonTooltips(listArea);
+            }
         })
         .catch(error => {
             listArea.innerHTML = `<p style="color:red;">정보를 불러오는 중 오류가 발생했습니다.</p>`;

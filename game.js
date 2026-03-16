@@ -55,6 +55,27 @@ function updateInventoryUI(data) {
     if (data.inv_html !== undefined) document.getElementById('hero-list').innerHTML = data.inv_html;
     if (data.deck_count !== undefined) document.getElementById('deck-count-display').innerText = data.deck_count;
     if (data.new_gold !== undefined) document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+    applyButtonTooltips();
+}
+
+function applyButtonTooltips(root = document) {
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+
+    const buttons = root.querySelectorAll('.btn, button');
+    buttons.forEach((btn) => {
+        const customTooltip = btn.getAttribute('data-tooltip');
+        if (customTooltip && customTooltip.trim() !== '') {
+            btn.setAttribute('title', customTooltip.trim());
+            return;
+        }
+
+        const existingTitle = btn.getAttribute('title');
+        if (existingTitle && existingTitle.trim() !== '') return;
+
+        const label = (btn.innerText || btn.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!label) return;
+        btn.setAttribute('title', `${label} 실행`);
+    });
 }
 
 function updateStatUI(points) {
@@ -1001,6 +1022,7 @@ async function combineHero(mode, targetName) {
     const data = await callApi('combine', { method: 'POST', body: formData });
     if (data && data.status === 'success') {
         document.getElementById('combine-list-area').innerHTML = data.html;
+        applyButtonTooltips(document.getElementById('combine-list-area'));
         if(data.msg) {
             addLog(data.msg);
             toggleEquip(0, -1);
@@ -1046,6 +1068,7 @@ async function openModal(modalId, listAreaId, action) {
     const data = await callApi(action);
     if(data && data.status === 'success') {
         document.getElementById(listAreaId).innerHTML = data.html;
+        applyButtonTooltips(document.getElementById(listAreaId));
     }
 }
 const openRanking = () => openModal('ranking-modal', 'ranking-list-area', 'ranking');
@@ -1065,6 +1088,7 @@ async function levelUpHero(invId) {
     if (data && data.status === 'success') {
         addLog(data.msg, true);
         document.getElementById('hero-levelup-list-area').innerHTML = data.html;
+        applyButtonTooltips(document.getElementById('hero-levelup-list-area'));
         document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
         toggleEquip(0, -1);
     } else if (data) {
@@ -1077,6 +1101,7 @@ async function upgradeRelic() {
     if (data && data.status === 'success') {
         addLog(data.msg, true);
         document.getElementById('relic-list-area').innerHTML = data.html;
+        applyButtonTooltips(document.getElementById('relic-list-area'));
         document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
     } else if (data) {
         addLog(data.msg, true);
@@ -1230,6 +1255,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     toggleEquip(0, -1); 
     setupStatButtons();
+    applyButtonTooltips();
     if (window.initialStatPoints !== undefined) updateStatUI(window.initialStatPoints);
     refreshCommanderStatHighlights();
     if (window.isDead) enterDeadState(); 

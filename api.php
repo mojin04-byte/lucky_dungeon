@@ -456,6 +456,61 @@ function apply_commander_rewards(PDO $pdo, $uid, $cmd_state, $gold_gain, $exp_ga
 	);
 }
 
+function escape_attr_text($text) {
+	$safe = htmlspecialchars((string)$text, ENT_QUOTES, 'UTF-8');
+	return str_replace(array("\r\n", "\r", "\n"), '&#10;', $safe);
+}
+
+function build_hero_tooltip($hero) {
+	global $hero_data;
+
+	$name = isset($hero['hero_name']) ? (string)$hero['hero_name'] : '알 수 없는 영웅';
+	$rank = isset($hero['hero_rank']) ? (string)$hero['hero_rank'] : '미상';
+	$level = max(1, (int)(isset($hero['level']) ? $hero['level'] : 1));
+	$quantity = max(1, (int)(isset($hero['quantity']) ? $hero['quantity'] : 1));
+	$battle_count = max(0, (int)(isset($hero['battle_count']) ? $hero['battle_count'] : 0));
+
+	$lines = array(
+		"{$name} [{$rank}]",
+		"레벨: {$level}",
+		"보유 수량: {$quantity}"
+	);
+
+	if ((int)(isset($hero['is_on_expedition']) ? $hero['is_on_expedition'] : 0) === 1) {
+		$lines[] = '상태: 파견 중';
+	} elseif ((int)(isset($hero['is_equipped']) ? $hero['is_equipped'] : 0) === 1) {
+		$lines[] = '상태: 출전 중';
+	} else {
+		$lines[] = '상태: 대기 중';
+	}
+
+	if ($battle_count > 0) {
+		$lines[] = "전투 참여: {$battle_count}회";
+	}
+
+	$skills = isset($hero_data[$name]['skills']) && is_array($hero_data[$name]['skills']) ? $hero_data[$name]['skills'] : array();
+	if (!empty($skills)) {
+		$lines[] = '스킬:';
+		foreach ($skills as $skill) {
+			if (!is_array($skill)) continue;
+			$skill_name = isset($skill['name']) ? trim((string)$skill['name']) : '';
+			$skill_desc = isset($skill['description']) ? trim((string)$skill['description']) : '';
+			if ($skill_name === '' && $skill_desc === '') continue;
+			if ($skill_name !== '' && $skill_desc !== '') {
+				$lines[] = "- {$skill_name}: {$skill_desc}";
+			} elseif ($skill_name !== '') {
+				$lines[] = "- {$skill_name}";
+			} else {
+				$lines[] = "- {$skill_desc}";
+			}
+		}
+	} else {
+		$lines[] = '스킬 정보: 없음';
+	}
+
+	return implode("\n", $lines);
+}
+
 function generate_hero_lists($heroes) {
 	$deck_html = '';
 	$inv_html = '';
@@ -463,11 +518,12 @@ function generate_hero_lists($heroes) {
 
 	foreach ($heroes as $h) {
 		$color = isset($GLOBALS['colors'][$h['hero_rank']]) ? $GLOBALS['colors'][$h['hero_rank']] : '#fff';
-		$card = "<div style='background:#222; padding:10px; margin-bottom:5px; border-radius:4px; border-left:3px solid {$color}; display:flex; justify-content:space-between; align-items:center;'>";
-		$card .= "<div><span style='color:{$color}; font-size:0.8rem;'>[{$h['hero_rank']}]</span> <span style='font-weight:bold;'>{$h['hero_name']}</span> (x{$h['quantity']})</div>";
+		$tooltip = escape_attr_text(build_hero_tooltip($h));
+		$card = "<div title='{$tooltip}' style='background:#222; padding:10px; margin-bottom:5px; border-radius:4px; border-left:3px solid {$color}; display:flex; justify-content:space-between; align-items:center; cursor:help;'>";
+		$card .= "<div title='{$tooltip}'><span style='color:{$color}; font-size:0.8rem;'>[{$h['hero_rank']}]</span> <span style='font-weight:bold;'>{$h['hero_name']}</span> (x{$h['quantity']})</div>";
 
 		if ((int)$h['is_equipped'] === 1 && (int)$h['is_on_expedition'] === 0) {
-			$card .= "<button class='btn' style='padding:5px 10px; font-size:0.8rem; background:#555;' onclick='toggleEquip({$h['inv_id']}, -1)'>해제</button></div>";
+			$card .= "<button class='btn' title='출전 덱에서 해제' style='padding:5px 10px; font-size:0.8rem; background:#555;' onclick='toggleEquip({$h['inv_id']}, -1)'>해제</button></div>";
 			$deck_html .= $card;
 			$deck_count += max(1, (int)$h['quantity']);
 		} else {
@@ -475,10 +531,10 @@ function generate_hero_lists($heroes) {
 				$card .= "<span style='color:#ff9800; font-size:0.8rem; font-weight:bold;'>[파견중]</span></div>";
 			} else {
 				$card .= "<div style='display:flex; gap:6px;'>";
-				$card .= "<button class='btn' style='padding:5px 10px; font-size:0.8rem;' onclick='toggleEquip({$h['inv_id']}, 1)'>출전</button>";
+				$card .= "<button class='btn' title='출전 덱에 추가' style='padding:5px 10px; font-size:0.8rem;' onclick='toggleEquip({$h['inv_id']}, 1)'>출전</button>";
 				if ($h['hero_rank'] === '일반' && (int)$h['quantity'] >= 3) {
 					$hero_name_js = json_encode($h['hero_name']);
-					$card .= "<button class='btn' style='padding:5px 10px; font-size:0.8rem; background:#2f7d32;' onclick='synthesizeHero({$hero_name_js})'>합성</button>";
+					$card .= "<button class='btn' title='동일 일반 영웅 3기를 합성' style='padding:5px 10px; font-size:0.8rem; background:#2f7d32;' onclick='synthesizeHero({$hero_name_js})'>합성</button>";
 				}
 				$card .= "</div></div>";
 			}
@@ -1542,7 +1598,7 @@ function handle_summon(PDO $pdo) {
 		}
 		$hero_name = $pool[array_rand($pool)];
 
-		$find = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? FOR UPDATE");
+		$find = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? AND is_equipped = 0 AND is_on_expedition = 0 LIMIT 1 FOR UPDATE");
 		$find->execute(array($uid, $hero_name));
 		$exists = $find->fetch();
 		if ($exists) {
@@ -1771,7 +1827,15 @@ function handle_equip(PDO $pdo) {
 							->execute(array($uid, $hero['hero_rank'], $hero['hero_name'], $battle_count, $level, $lore));
 					}
 				} else {
-					$pdo->prepare("UPDATE tb_heroes SET is_equipped = 0 WHERE inv_id = ?")->execute(array($inv_id));
+					$stack = $pdo->prepare("SELECT inv_id FROM tb_heroes WHERE uid = ? AND hero_name = ? AND is_equipped = 0 AND is_on_expedition = 0 AND inv_id != ? LIMIT 1 FOR UPDATE");
+					$stack->execute(array($uid, $hero['hero_name'], $inv_id));
+					$existing = $stack->fetch();
+					if ($existing) {
+						$pdo->prepare("UPDATE tb_heroes SET quantity = quantity + 1 WHERE inv_id = ?")->execute(array($existing['inv_id']));
+						$pdo->prepare("DELETE FROM tb_heroes WHERE inv_id = ?")->execute(array($inv_id));
+					} else {
+						$pdo->prepare("UPDATE tb_heroes SET is_equipped = 0 WHERE inv_id = ?")->execute(array($inv_id));
+					}
 				}
 			}
 		}
