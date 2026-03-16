@@ -1,9 +1,16 @@
 // game.js
 let isAutoMode = false;
+let isAutoExploreMode = false;
+let isAutoRestMode = false;
 let combatTimer = null;
+let autoActionTimer = null;
 let isProcessingTurn = false;
+let isProcessingAction = false;
 let autoExploreTimer = null;
 const MONSTER_HP_STEP_DELAY = 150;
+const AUTO_ACTION_DELAY = 450;
+const AUTO_REST_HP_THRESHOLD = 0.45;
+const AUTO_REST_MP_THRESHOLD = 0.35;
 
 const BATTLE_STAGE = {
     EXPLORE: 'explore',
@@ -100,6 +107,8 @@ function updatePlayerBars(hp, max_hp, mp, max_mp) {
 
     window.playerMaxHp = max_hp; // 전역 변수 갱신
     window.playerMaxMp = max_mp;
+    window.playerCurrentHp = hp;
+    window.playerCurrentMp = mp;
     document.getElementById('player-hp-text').innerText = `HP (${hp} / ${max_hp})`;
     document.getElementById('player-hp-bar').style.width = (hp / max_hp * 100) + '%';
     document.getElementById('player-mp-text').innerText = `MP (${mp} / ${max_mp})`;
@@ -216,8 +225,20 @@ function toPlainLogText(message) {
 }
 
 function getCurrentPlayerHp() {
+    if (window.playerCurrentHp !== undefined && window.playerCurrentHp !== null) {
+        return Number(window.playerCurrentHp) || 0;
+    }
     const hpText = document.getElementById('player-hp-text');
     const match = hpText ? hpText.innerText.match(/\((\d+)\s*\/\s*\d+\)/) : null;
+    return match ? Number(match[1]) : 0;
+}
+
+function getCurrentPlayerMp() {
+    if (window.playerCurrentMp !== undefined && window.playerCurrentMp !== null) {
+        return Number(window.playerCurrentMp) || 0;
+    }
+    const mpText = document.getElementById('player-mp-text');
+    const match = mpText ? mpText.innerText.match(/\((\d+)\s*\/\s*\d+\)/) : null;
     return match ? Number(match[1]) : 0;
 }
 
@@ -238,6 +259,98 @@ function triggerIncomingDamageEffect() {
         void el.offsetWidth;
         el.classList.add('hp-hit');
     });
+}
+
+function hasAutomationEnabled() {
+    return isAutoExploreMode || isAutoRestMode;
+}
+
+function isBackgroundAutoExploreRunning() {
+    const statusDisplay = document.getElementById('auto-explore-status-display');
+    const claimBtn = document.getElementById('btn-claim-auto-explore');
+    return Boolean(statusDisplay && claimBtn && statusDisplay.style.display !== 'none' && claimBtn.style.display !== 'none');
+}
+
+function updateAutoExploreModeUI() {
+    const statusEl = document.getElementById('auto-explore-status-text');
+    if (!statusEl) return;
+    statusEl.innerText = isAutoExploreMode ? '[ON]' : '[OFF]';
+    statusEl.style.color = isAutoExploreMode ? '#81c784' : '#aaa';
+}
+
+function updateAutoRestModeUI() {
+    const statusEl = document.getElementById('auto-rest-status-text');
+    if (!statusEl) return;
+    statusEl.innerText = isAutoRestMode ? '[ON]' : '[OFF]';
+    statusEl.style.color = isAutoRestMode ? '#ffb74d' : '#aaa';
+}
+
+function clearAutoActionTimer() {
+    if (autoActionTimer) {
+        clearTimeout(autoActionTimer);
+        autoActionTimer = null;
+    }
+}
+
+function shouldAutoRest() {
+    if (!isAutoRestMode) return false;
+    const hpRatio = getCurrentPlayerHp() / Math.max(1, Number(window.playerMaxHp || 1));
+    const mpRatio = getCurrentPlayerMp() / Math.max(1, Number(window.playerMaxMp || 1));
+    return hpRatio <= AUTO_REST_HP_THRESHOLD || mpRatio <= AUTO_REST_MP_THRESHOLD;
+}
+
+function scheduleAutoAction(delay = AUTO_ACTION_DELAY) {
+    clearAutoActionTimer();
+    if (!hasAutomationEnabled()) return;
+    if (window.isDead || window.isCombat || isProcessingTurn || isProcessingAction) return;
+    if (isBackgroundAutoExploreRunning()) return;
+    if (!isAutoExploreMode && !shouldAutoRest()) return;
+
+    autoActionTimer = setTimeout(runAutoActionLoop, Math.max(0, delay));
+}
+
+async function runAutoActionLoop() {
+    clearAutoActionTimer();
+    if (!hasAutomationEnabled()) return;
+    if (window.isDead || window.isCombat || isProcessingTurn || isProcessingAction) return;
+    if (isBackgroundAutoExploreRunning()) return;
+
+    if (shouldAutoRest()) {
+        await sendAction('rest');
+        return;
+    }
+
+    if (isAutoExploreMode) {
+        await sendAction('action');
+    }
+}
+
+function toggleAutoExploreMode() {
+    const toggle = document.getElementById('auto-explore-toggle');
+    if (!toggle) return;
+    isAutoExploreMode = toggle.checked;
+    updateAutoExploreModeUI();
+
+    if (hasAutomationEnabled()) scheduleAutoAction(250);
+    else clearAutoActionTimer();
+}
+
+function toggleAutoRestMode() {
+    const toggle = document.getElementById('auto-rest-toggle');
+    if (!toggle) return;
+    isAutoRestMode = toggle.checked;
+    updateAutoRestModeUI();
+
+    if (hasAutomationEnabled()) scheduleAutoAction(250);
+    else clearAutoActionTimer();
+}
+
+function disableAutoRestMode(logMessage = '') {
+    const toggle = document.getElementById('auto-rest-toggle');
+    if (toggle) toggle.checked = false;
+    isAutoRestMode = false;
+    updateAutoRestModeUI();
+    if (logMessage) addLog(logMessage, true);
 }
 
 async function typeText(targetEl, text, delayMs = 8) {
@@ -466,6 +579,7 @@ function enterDeadState() {
     window.isDead = true;
     window.isCombat = false;
     clearCombatTimer();
+    clearAutoActionTimer();
     setBattleStage(BATTLE_STAGE.DEAD);
     addLog('<h2 style="color:red;">☠️ 사망하였습니다.</h2>모든 행동이 불가능합니다. 여신의 축복을 받으세요.', true);
 }
@@ -475,6 +589,7 @@ function exitToExploreState() {
     clearCombatTimer();
     document.body.classList.remove('boss-bg');
     setBattleStage(BATTLE_STAGE.EXPLORE);
+    scheduleAutoAction(AUTO_ACTION_DELAY);
 }
 
 function enterEncounterState(mobName, mobMaxHp) {
@@ -487,6 +602,7 @@ function enterEncounterState(mobName, mobMaxHp) {
 
 function enterCombatState(mobName, mobMaxHp) {
     window.isCombat = true;
+    clearAutoActionTimer();
     if (!window.currentMobHp || window.currentMobHp <= 0) window.currentMobHp = mobMaxHp;
     setBattleStage(BATTLE_STAGE.COMBAT, mobName, mobMaxHp);
     if (isAutoMode) doCombatTurn();
@@ -666,11 +782,24 @@ function startCombat() {
 
 // game.js 내부 sendAction 함수 교체
 async function sendAction(actionType) {
+    if (isProcessingAction) return;
+    isProcessingAction = true;
+    clearAutoActionTimer();
+
     // 🚨 중복 클릭 방지: 통신 중에는 모든 버튼 잠금
     const btns = document.querySelectorAll('.action-container .btn');
     btns.forEach(b => b.style.pointerEvents = 'none');
 
     let isStreamInProgress = false;
+    let shouldRescheduleAutomation = false;
+
+    const finalizeActionState = (resumeAutomation) => {
+        isProcessingAction = false;
+        setTimeout(() => {
+            btns.forEach(b => b.style.pointerEvents = 'auto');
+        }, 300);
+        if (resumeAutomation) scheduleAutoAction(AUTO_ACTION_DELAY);
+    };
 
     try {
         // 🚨 즉각적인 피드백 로그 (서버 응답을 기다리는 동안 유저가 지루하지 않게 함)
@@ -727,7 +856,7 @@ async function sendAction(actionType) {
                             if (event.data === '[DONE]') {
                                 source.close();
                                 if (data.status === 'encounter') enterEncounterState(data.mob_name, data.mob_max_hp);
-                                btns.forEach(b => b.style.pointerEvents = 'auto');
+                                finalizeActionState(true);
                                 return;
                             }
                             const chunk = JSON.parse(event.data);
@@ -741,11 +870,12 @@ async function sendAction(actionType) {
                         source.onerror = function() {
                             source.close();
                             if (data.status === 'encounter') enterEncounterState(data.mob_name, data.mob_max_hp);
-                            btns.forEach(b => b.style.pointerEvents = 'auto');
+                            finalizeActionState(true);
                         };
                     } else {
                         if (data.log) addLog(data.log);
                         if (data.status === 'encounter') enterEncounterState(data.mob_name, data.mob_max_hp);
+                        shouldRescheduleAutomation = true;
                     }
                 } else if (data.status === 'error') {
                     addLog(data.msg, true);
@@ -760,8 +890,15 @@ async function sendAction(actionType) {
                     else { // 휴식 성공 시 바 갱신
                         updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
                         document.getElementById('gold-display').innerText = data.new_gold.toLocaleString();
+                        shouldRescheduleAutomation = true;
                     }
                 } else {
+                    if (actionType === 'rest' && data.msg && data.msg.includes('마력석이 부족')) {
+                        disableAutoRestMode('⚠️ 자동 휴식을 중지했습니다. 휴식 골드가 부족합니다.');
+                        shouldRescheduleAutomation = isAutoExploreMode;
+                    } else if (actionType === 'rest' && isAutoExploreMode) {
+                        shouldRescheduleAutomation = true;
+                    }
                     addLog(data.msg, true);
                  }
             } else if (actionType === 'next_floor') {
@@ -773,6 +910,7 @@ async function sendAction(actionType) {
                         updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
                     }
                     if (data.msg) addLog(data.msg, true);
+                    shouldRescheduleAutomation = hasAutomationEnabled();
                 } else {
                     addLog(data.msg, true);
                 }
@@ -781,11 +919,10 @@ async function sendAction(actionType) {
     } catch (e) {
         console.error("sendAction Error:", e);
         addLog("❌ 클라이언트 오류가 발생했습니다.", true);
+        shouldRescheduleAutomation = false;
     } finally {
         if (!isStreamInProgress) {
-            setTimeout(() => {
-                btns.forEach(b => b.style.pointerEvents = 'auto');
-            }, 300);
+            finalizeActionState(shouldRescheduleAutomation);
         }
     }
 }
@@ -1027,6 +1164,7 @@ function updateAutoExploreUI(isExploring, data) {
     const exploreActions = document.getElementById('explore-actions');
 
     if (isExploring) {
+        clearAutoActionTimer();
         statusDisplay.style.display = 'block';
         startBtn.style.display = 'none';
         claimBtn.style.display = 'block';
@@ -1042,6 +1180,7 @@ function updateAutoExploreUI(isExploring, data) {
         claimBtn.style.display = 'none';
         if(!window.isDead && !window.isCombat) {
             exploreActions.style.display = 'grid';
+            scheduleAutoAction(AUTO_ACTION_DELAY);
         }
     }
 }
@@ -1069,13 +1208,25 @@ function setupStatButtons() {
 window.addEventListener('DOMContentLoaded', () => { 
     window.playerMaxHp = window.playerMaxHp || 0; // index.php 초기값 사용
     window.playerMaxMp = window.playerMaxMp || 0;
+    window.playerCurrentHp = window.playerCurrentHp || 0;
+    window.playerCurrentMp = window.playerCurrentMp || 0;
 
     // 전투 모드 기본값: 수동
     const autoToggle = document.getElementById('auto-combat-toggle');
     if (autoToggle) {
         autoToggle.checked = false;
     }
+    const autoExploreToggle = document.getElementById('auto-explore-toggle');
+    if (autoExploreToggle) {
+        autoExploreToggle.checked = false;
+    }
+    const autoRestToggle = document.getElementById('auto-rest-toggle');
+    if (autoRestToggle) {
+        autoRestToggle.checked = false;
+    }
     toggleAutoMode();
+    toggleAutoExploreMode();
+    toggleAutoRestMode();
 
     toggleEquip(0, -1); 
     setupStatButtons();

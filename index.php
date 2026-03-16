@@ -231,10 +231,22 @@ if ($commander_stat_max > $commander_stat_min) {
     <div class="panel center-panel">
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #333; background: #111;">
             <h2 style="margin: 0; border: none; padding: 0;">던전 <span id="floor-display"><?= $commander['current_floor'] ?></span> 층</h2>
-            <div>
-                <span style="color: #aaa; font-size: 0.9rem;">전투 모드:</span>
-                <label class="switch"><input type="checkbox" id="auto-combat-toggle" onchange="toggleAutoMode()"><span class="slider"></span></label>
-                <span id="auto-status-text" style="color: #4caf50; font-weight: bold; font-size: 0.9rem;">[수동]</span>
+            <div style="display:flex; align-items:center; justify-content:flex-end; gap:14px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="color: #aaa; font-size: 0.9rem;">자동 전투</span>
+                    <label class="switch"><input type="checkbox" id="auto-combat-toggle" onchange="toggleAutoMode()"><span class="slider"></span></label>
+                    <span id="auto-status-text" style="color: #4caf50; font-weight: bold; font-size: 0.9rem;">[수동]</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;" title="전투가 끝나면 자동으로 다시 탐색을 이어갑니다.">
+                    <span style="color: #aaa; font-size: 0.9rem;">자동 탐험</span>
+                    <label class="switch"><input type="checkbox" id="auto-explore-toggle" onchange="toggleAutoExploreMode()"><span class="slider"></span></label>
+                    <span id="auto-explore-status-text" style="color: #aaa; font-weight: bold; font-size: 0.9rem;">[OFF]</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;" title="HP 45% 이하 또는 MP 35% 이하일 때 자동으로 휴식합니다.">
+                    <span style="color: #aaa; font-size: 0.9rem;">자동 휴식</span>
+                    <label class="switch"><input type="checkbox" id="auto-rest-toggle" onchange="toggleAutoRestMode()"><span class="slider"></span></label>
+                    <span id="auto-rest-status-text" style="color: #aaa; font-weight: bold; font-size: 0.9rem;">[OFF]</span>
+                </div>
             </div>
         </div>
 
@@ -395,6 +407,8 @@ if ($commander_stat_max > $commander_stat_min) {
     <script>
         window.playerMaxHp = <?= (int)$commander['max_hp'] ?>;
         window.playerMaxMp = <?= (int)$commander['max_mp'] ?>;
+        window.playerCurrentHp = <?= (int)$commander['hp'] ?>;
+        window.playerCurrentMp = <?= (int)$commander['mp'] ?>;
         window.isDead = <?= ($commander['hp'] <= 0) ? 'true' : 'false' ?>;
         window.isCombat = <?= ($commander['is_combat'] == 1) ? 'true' : 'false' ?>;
         window.currentMobName = <?= json_encode($commander['mob_name'] ?? '') ?>;

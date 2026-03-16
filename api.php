@@ -1918,7 +1918,7 @@ function handle_combine(PDO $pdo) {
 		$html .= '<p style="color:#ccc; font-size:0.9rem;">출전/파견 중이 아닌 재료 영웅을 소모해 대상 신화를 직접 조합합니다.</p>';
 		foreach ($mythic_recipes as $mythic => $info) {
 			$req_counts = array_count_values($info['materials']);
-			$can_craft = (bool)$info['enabled'];
+			$can_craft = true;
 			$parts = array();
 			foreach ($req_counts as $mat => $need) {
 				$owned = $fetch_available_count($mat);
@@ -1928,9 +1928,7 @@ function handle_combine(PDO $pdo) {
 			$safe_name = str_replace("'", "\\'", $mythic);
 			$html .= "<div style='padding:10px; border:1px solid #444; margin-top:8px; border-radius:4px;'>";
 			$html .= "<b style='color:#ff8a80;'>[신화]</b> <b>{$mythic}</b><br><span style='color:#aaa; font-size:0.85rem;'>재료: " . implode(' + ', $parts) . "</span>";
-			if (!$info['enabled']) {
-				$html .= "<button class='btn' style='float:right; background:#555;' disabled>불가</button>";
-			} elseif ($can_craft) {
+			if ($can_craft) {
 				$html .= "<button class='btn' style='float:right;' onclick=\"if(confirm('{$mythic} 조합을 진행하시겠습니까?')) combineHero('combine_mythic', '{$safe_name}')\">조합</button>";
 			} else {
 				$html .= "<button class='btn' style='float:right; background:#555;' disabled>재료 부족</button>";
@@ -1939,26 +1937,36 @@ function handle_combine(PDO $pdo) {
 		}
 		$html .= '</div><div style="background:#222; padding:15px; border-radius:5px;">';
 		$html .= '<h3 style="color:#ffeb3b; margin-top:0;">불멸 진화</h3>';
-		$html .= '<p style="color:#ccc; font-size:0.9rem;">진화 조건: 대상 신화 영웅 전투 1000회</p>';
-		$has_evolve = false;
-		foreach ($evolution_recipes as $mythic => $immortal) {
+		$html .= '<p style="color:#ccc; font-size:0.9rem;">진화 조건: 대상 신화 영웅 전투 1000회. 일부 신화 영웅은 불멸 진화가 불가능합니다.</p>';
+		$has_mythic = false;
+		foreach ($mythic_recipes as $mythic => $_info) {
 			$owned = $fetch_available_count($mythic);
 			if ($owned <= 0) continue;
-			$has_evolve = true;
+			$has_mythic = true;
+			$can_evolve_hero = isset($evolution_recipes[$mythic]);
+			$immortal = $can_evolve_hero ? $evolution_recipes[$mythic] : '';
 			$need_battles = isset($evolution_requirements[$mythic]['battle_count']) ? (int)$evolution_requirements[$mythic]['battle_count'] : 1000;
 			$max_battle = $fetch_max_battle_count($mythic);
-			$can_evolve = ($max_battle >= $need_battles);
+			$can_evolve = ($can_evolve_hero && $max_battle >= $need_battles);
 			$safe_mythic = str_replace("'", "\\'", $mythic);
-			$html .= "<div style='padding:10px; border:1px solid #444; margin-top:10px; border-radius:4px;'><strong>{$mythic}</strong> ▶ <strong>{$immortal}</strong>";
-			$html .= "<div style='color:#aaa; font-size:0.85rem; margin-top:4px;'>전투: {$max_battle} / {$need_battles}</div>";
+			$html .= "<div style='padding:10px; border:1px solid #444; margin-top:10px; border-radius:4px;'><strong>{$mythic}</strong>";
+			if ($can_evolve_hero) {
+				$html .= " ▶ <strong>{$immortal}</strong>";
+				$html .= "<div style='color:#aaa; font-size:0.85rem; margin-top:4px;'>전투: {$max_battle} / {$need_battles}</div>";
+			} else {
+				$html .= " <span style='color:#888;'>▶ 불멸 진화 없음</span>";
+				$html .= "<div style='color:#888; font-size:0.85rem; margin-top:4px;'>이 신화 영웅은 현재 불멸 진화 대상이 아닙니다.</div>";
+			}
 			if ($can_evolve) {
 				$html .= "<button class='btn' style='background:#ffeb3b; color:#000; float:right;' onclick=\"if(confirm('{$mythic}을(를) {$immortal}(으)로 진화시키겠습니까?')) combineHero('evolve', '{$safe_mythic}')\">진화</button>";
+			} elseif (!$can_evolve_hero) {
+				$html .= "<button class='btn' style='background:#555; float:right;' disabled>진화 불가</button>";
 			} else {
 				$html .= "<button class='btn' style='background:#555; float:right;' disabled>전투 횟수 부족</button>";
 			}
 			$html .= "<div style='clear:both;'></div></div>";
 		}
-		if (!$has_evolve) $html .= '<p style="color:#777; text-align:center;">진화 가능한 영웅이 없습니다.</p>';
+		if (!$has_mythic) $html .= '<p style="color:#777; text-align:center;">보유한 신화 영웅이 없습니다.</p>';
 		$html .= '</div>';
 		return $html;
 	};
@@ -1972,7 +1980,6 @@ function handle_combine(PDO $pdo) {
 		if ($mode === 'combine_mythic') {
 			if (!isset($mythic_recipes[$target_name])) throw new Exception('알 수 없는 신화 조합 레시피입니다.');
 			$recipe = $mythic_recipes[$target_name];
-			if (!$recipe['enabled']) throw new Exception('해당 신화 조합은 현재 불가입니다.');
 
 			$pdo->beginTransaction();
 			$req_counts = array_count_values($recipe['materials']);
@@ -2024,7 +2031,7 @@ function handle_combine(PDO $pdo) {
 		}
 
 		if ($mode === 'evolve') {
-			if (!isset($evolution_recipes[$target_name])) throw new Exception('알 수 없는 진화 레시피입니다.');
+			if (!isset($evolution_recipes[$target_name])) throw new Exception('해당 신화 영웅은 불멸 진화가 불가능합니다.');
 			$evolved_name = $evolution_recipes[$target_name];
 			$need_battles = isset($evolution_requirements[$target_name]['battle_count']) ? (int)$evolution_requirements[$target_name]['battle_count'] : 1000;
 			$pdo->beginTransaction();
