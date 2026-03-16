@@ -184,8 +184,6 @@ $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $ex
         ?>)</span></div>
         <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div class="btn" onclick="openRanking()" style="padding: 10px; font-size: 0.9rem;">명예의 전당 🏆</div>
-            <div class="btn" onclick="openBookModal()" style="padding: 10px; font-size: 0.9rem;">영웅 도감 📜</div>
-            <div class="btn" onclick="openHeroLevelupModal()" style="padding: 10px; font-size: 0.9rem; background:#3f51b5;">영웅 제단 ⛩️</div>
             <div class="btn" onclick="openRelicModal()" style="padding: 10px; font-size: 0.9rem; background:#6d4c41;">유물 제련 🗿</div>
             <div class="btn" onclick="document.getElementById('stat-help-modal').style.display='flex'" style="padding: 10px; font-size: 0.9rem; background:#455a64; grid-column: span 2;">스탯 공식 도움말 📘</div>
         </div>
@@ -223,8 +221,8 @@ $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $ex
 
         <div id="explore-actions" class="action-container">
             <div class="btn" onclick="sendAction('action')">탐색하기 👣</div>
-            <div class="btn" style="background:#1976d2;" onclick="sendAction('next_floor')">다음 층 이동 ⬆️</div>
             <div class="btn" onclick="sendAction('rest')">휴식하기 🏕️</div>
+            <div class="btn" style="background:#1976d2;" onclick="sendAction('next_floor')">다음 층 이동 ⬆️</div>
             <div class="btn btn-summon" onclick="sendAction('summon')">영웅 소환 ✨</div>
             <div class="btn" style="background:#673ab7;" onclick="openCombineModal()">조합/진화 🔮</div>
         </div>
@@ -355,6 +353,10 @@ $exp_progress_width = ($exp_to_next > 0) ? (((int)($commander['exp'] ?? 0) / $ex
                 대기 중인 영웅을 파견하여 추가 보상을 획득하세요.
             </p>
             <button id="btn-open-expedition-modal" class="btn" style="width:100%; background-color: #4a6;" onclick="openExpeditionModal()">토벌대 관리</button>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                <div class="btn" onclick="openBookModal()" style="padding: 10px; font-size: 0.9rem;">영웅 도감 📜</div>
+                <div class="btn" onclick="openHeroLevelupModal()" style="padding: 10px; font-size: 0.9rem; background:#3f51b5;">영웅 제단 ⛩️</div>
+            </div>
         </div>
     </div>
 

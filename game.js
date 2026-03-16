@@ -155,7 +155,7 @@ function toPlainLogText(message) {
     return (tmp.textContent || tmp.innerText || '').trim();
 }
 
-async function typeText(targetEl, text, delayMs = 24) {
+async function typeText(targetEl, text, delayMs = 12) {
     const chars = Array.from(String(text || ''));
     for (const ch of chars) {
         targetEl.textContent += ch;
@@ -189,7 +189,7 @@ async function renderTurnScriptBlock(targetEl, data) {
         textEl.textContent += '\n';
         const logBox = document.getElementById('game-log');
         if (logBox) logBox.scrollTop = logBox.scrollHeight;
-        await wait(70);
+        await wait(35);
     }
 }
 
@@ -211,7 +211,7 @@ async function addTurnDamageBreakdown(data) {
     const statusLines = getStatusEffectLines(data);
     for (const line of damageLines.concat(statusLines)) {
         await addTypedLogLine(line, true);
-        await wait(60);
+        await wait(30);
     }
 }
 
@@ -320,13 +320,11 @@ function exitToExploreState() {
 }
 
 function enterEncounterState(mobName, mobMaxHp) {
-    window.isCombat = true;
-    window.currentMobHp = mobMaxHp;
-    setBattleStage(BATTLE_STAGE.ENCOUNTER, mobName, mobMaxHp);
     if (mobName.includes('[보스]')) {
         document.body.classList.add('boss-bg');
         addLog(`<span style="color:red; font-size:1.1rem; font-weight:bold; text-shadow:0 0 5px red;">⚠️ 경고: 강력한 보스의 살기가 느껴집니다!</span>`);
     }
+    enterCombatState(mobName, mobMaxHp);
 }
 
 function enterCombatState(mobName, mobMaxHp) {
@@ -385,7 +383,7 @@ async function doCombatTurn() {
     if (data) {
         if (data.status === 'error') {
             if (data.msg && data.msg.includes('대치')) {
-                enterEncounterState(window.currentMobName || '정체불명의 적', window.currentMobMaxHp || 1);
+                enterCombatState(window.currentMobName || '정체불명의 적', window.currentMobMaxHp || 1);
                 addLog(data.msg, true);
             } else {
                 exitToExploreState();
@@ -409,7 +407,7 @@ async function doCombatTurn() {
                     const headerEl = streamLog.querySelector('.turn-script-header');
                     if (headerEl) {
                         headerEl.textContent = '';
-                        await typeText(headerEl, '[전투 스크립트 ✨]', 22);
+                        await typeText(headerEl, '[전투 스크립트 ✨]', 11);
                     }
 
                     await renderTurnScriptBlock(streamLog, data);
@@ -425,7 +423,7 @@ async function doCombatTurn() {
                             isProcessingTurn = false;
                             if (data.status === 'victory') { exitToExploreState(); toggleEquip(0, -1); } 
                             else if (data.status === 'defeat') { enterDeadState(); } 
-                            else if (isAutoMode) { combatTimer = setTimeout(doCombatTurn, 1000); }
+                            else if (isAutoMode) { combatTimer = setTimeout(doCombatTurn, 500); }
                             return;
                         }
                         const chunk = JSON.parse(event.data);
@@ -445,7 +443,7 @@ async function doCombatTurn() {
                     }
                     if (data.status === 'victory') { exitToExploreState(); toggleEquip(0, -1); } 
                     else if (data.status === 'defeat') { enterDeadState(); } 
-                    else if (isAutoMode) { combatTimer = setTimeout(doCombatTurn, 1000); }
+                    else if (isAutoMode) { combatTimer = setTimeout(doCombatTurn, 500); }
                 }
         }
     }
