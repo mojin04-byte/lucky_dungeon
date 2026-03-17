@@ -165,11 +165,166 @@ function updateExpBar(level, exp, expToNext) {
     document.getElementById('exp-bar').style.width = (safeExp / safeMax * 100) + '%';
 }
 
+function pulseUiElement(element, glowColor = 'rgba(255, 255, 255, 0.45)') {
+    if (!element) return;
+
+    const prev = {
+        transition: element.style.transition,
+        transform: element.style.transform,
+        textShadow: element.style.textShadow,
+        boxShadow: element.style.boxShadow,
+    };
+
+    element.style.transition = 'transform 0.22s ease, text-shadow 0.22s ease, box-shadow 0.22s ease';
+    element.style.transform = 'scale(1.06)';
+    element.style.textShadow = `0 0 12px ${glowColor}`;
+    element.style.boxShadow = `0 0 16px ${glowColor}`;
+
+    setTimeout(() => {
+        element.style.transform = prev.transform;
+        element.style.textShadow = prev.textShadow;
+        element.style.boxShadow = prev.boxShadow;
+        element.style.transition = prev.transition;
+    }, 240);
+}
+
+function ensureExploreToastLayer() {
+    let layer = document.getElementById('explore-toast-layer');
+    if (layer) return layer;
+
+    layer = document.createElement('div');
+    layer.id = 'explore-toast-layer';
+    Object.assign(layer.style, {
+        position: 'fixed',
+        top: '14px',
+        right: '14px',
+        zIndex: '2300',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        width: 'min(360px, calc(100vw - 28px))',
+        pointerEvents: 'none'
+    });
+    document.body.appendChild(layer);
+    return layer;
+}
+
+function showExploreToast({ icon = '✨', title = '탐색 결과', value = '', detail = '', borderColor = '#90caf9', gradient = 'linear-gradient(120deg, rgba(15,22,34,0.95), rgba(18,27,44,0.92))' }) {
+    const layer = ensureExploreToastLayer();
+    const card = document.createElement('div');
+    Object.assign(card.style, {
+        border: `1px solid ${borderColor}`,
+        borderLeft: `6px solid ${borderColor}`,
+        borderRadius: '10px',
+        padding: '10px 12px',
+        background: gradient,
+        color: '#eceff1',
+        boxShadow: '0 10px 20px rgba(0,0,0,0.38)',
+        opacity: '0',
+        transform: 'translateY(-10px) scale(0.98)',
+        transition: 'opacity 0.2s ease, transform 0.2s ease'
+    });
+
+    card.innerHTML = `
+        <div style="font-size:0.8rem; color:#b0bec5; font-weight:bold; letter-spacing:0.4px;">${icon} ${title}</div>
+        <div style="font-size:1.15rem; color:#ffffff; font-weight:bold; margin-top:3px;">${value}</div>
+        ${detail ? `<div style="font-size:0.82rem; color:#cfd8dc; margin-top:2px;">${detail}</div>` : ''}
+    `;
+
+    layer.appendChild(card);
+    requestAnimationFrame(() => {
+        card.style.opacity = '1';
+        card.style.transform = 'translateY(0) scale(1)';
+    });
+
+    setTimeout(() => {
+        card.style.opacity = '0';
+        card.style.transform = 'translateY(-8px) scale(0.98)';
+    }, 2100);
+    setTimeout(() => {
+        if (card.parentNode) card.parentNode.removeChild(card);
+    }, 2400);
+}
+
+function renderExploreOutcomeHighlights(data, hpBeforeAction) {
+    if (!data || data.status !== 'safe') return;
+
+    const eventType = String(data.event_type || '').toLowerCase();
+    const goldGain = Math.max(0, Number(data.reward_gold || 0));
+    const expGain = Math.max(0, Number(data.reward_exp || 0));
+    const trapDamageFromApi = Math.max(0, Number(data.trap_damage || 0));
+    const hpLossByDiff = Math.max(0, Number(hpBeforeAction || 0) - Number(data.new_hp || hpBeforeAction || 0));
+    const trapDamage = Math.max(trapDamageFromApi, hpLossByDiff);
+
+    if ((eventType === 'gold' || eventType === 'chest') && goldGain > 0) {
+        showExploreToast({
+            icon: '💰',
+            title: '골드 발견',
+            value: `+${goldGain.toLocaleString()} G`,
+            detail: '획득 골드가 즉시 반영되었습니다.',
+            borderColor: '#ffd54f',
+            gradient: 'linear-gradient(120deg, rgba(70,50,12,0.96), rgba(32,24,10,0.94))'
+        });
+    }
+
+    if (eventType === 'exp' && expGain > 0) {
+        showExploreToast({
+            icon: '📘',
+            title: '경험치 획득',
+            value: `+${expGain.toLocaleString()} EXP`,
+            detail: 'EXP 바와 레벨업 연출이 즉시 갱신됩니다.',
+            borderColor: '#b388ff',
+            gradient: 'linear-gradient(120deg, rgba(36,18,68,0.95), rgba(18,10,32,0.94))'
+        });
+    }
+
+    if (eventType === 'trap') {
+        if (trapDamage > 0) {
+            showExploreToast({
+                icon: '🩸',
+                title: '함정 발동',
+                value: `-${trapDamage.toLocaleString()} HP`,
+                detail: '함정 피해가 즉시 적용되었습니다.',
+                borderColor: '#ef9a9a',
+                gradient: 'linear-gradient(120deg, rgba(84,18,18,0.96), rgba(34,9,9,0.94))'
+            });
+        } else if (goldGain > 0) {
+            showExploreToast({
+                icon: '🍀',
+                title: '함정 회피 성공',
+                value: `+${goldGain.toLocaleString()} G`,
+                detail: '함정을 피하고 보상을 획득했습니다.',
+                borderColor: '#aed581',
+                gradient: 'linear-gradient(120deg, rgba(26,62,34,0.96), rgba(12,30,17,0.94))'
+            });
+        } else {
+            showExploreToast({
+                icon: '🛡️',
+                title: '함정 무효',
+                value: '피해 없음',
+                detail: '함정 피해를 완전히 막아냈습니다.',
+                borderColor: '#80cbc4',
+                gradient: 'linear-gradient(120deg, rgba(20,56,58,0.96), rgba(10,28,32,0.94))'
+            });
+        }
+    }
+}
+
 function parseFloorNumber(value) {
     const numeric = Number(value);
     if (Number.isFinite(numeric)) return Math.max(0, Math.floor(numeric));
     const match = String(value || '').match(/\d+/);
     return match ? Number(match[0]) : 0;
+}
+
+function getCurrentFloorNumber() {
+    const floorEl = document.getElementById('floor-display');
+    return parseFloorNumber(floorEl ? floorEl.innerText : 0);
+}
+
+function isBossPreFloor(floor = getCurrentFloorNumber()) {
+    const safeFloor = Math.max(0, Number(floor) || 0);
+    return safeFloor > 0 && (safeFloor % 10) === 9;
 }
 
 function updateFloorDisplay(newFloor, newMaxFloor) {
@@ -179,6 +334,9 @@ function updateFloorDisplay(newFloor, newMaxFloor) {
 
     if (floorEl && parsedNewFloor > 0) {
         floorEl.innerText = String(parsedNewFloor);
+        if (isAutoExploreMode && isBossPreFloor(parsedNewFloor)) {
+            disableAutoExploreMode(`⛔ ${parsedNewFloor}층은 보스 전층입니다. 자동 탐색이 중지되었습니다. 보스전에 앞서 수동으로 진행해 주세요.`);
+        }
     }
 
     if (!maxFloorEl) return;
@@ -200,11 +358,19 @@ function applyRewardUi(data) {
     const prevLevel = Number(document.getElementById('level-display').innerText || 1);
 
     if (data.new_gold !== undefined) {
-        document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+        const goldEl = document.getElementById('gold-display');
+        goldEl.innerText = Number(data.new_gold).toLocaleString();
+        if (Number(data.reward_gold || 0) > 0) {
+            pulseUiElement(goldEl, 'rgba(255, 213, 79, 0.72)');
+        }
     }
 
     if (data.new_level !== undefined && data.new_exp !== undefined) {
         updateExpBar(data.new_level, data.new_exp, data.exp_to_next);
+        if (Number(data.reward_exp || 0) > 0) {
+            pulseUiElement(document.getElementById('exp-text'), 'rgba(179, 136, 255, 0.72)');
+            pulseUiElement(document.getElementById('exp-bar'), 'rgba(179, 136, 255, 0.62)');
+        }
         const levelupCount = Number(data.levelup_count || (Array.isArray(data.levelup_logs) ? data.levelup_logs.length : 0));
         if (Number(data.new_level) > prevLevel) {
             showLevelUpEffect(prevLevel, Number(data.new_level), levelupCount || 1);
@@ -354,6 +520,9 @@ function scheduleAutoAction(delay = AUTO_ACTION_DELAY) {
     if (!hasAutomationEnabled()) return;
     if (window.isDead || window.isCombat || isProcessingTurn || isProcessingAction) return;
     if (isBackgroundAutoExploreRunning()) return;
+    if (isAutoExploreMode && isBossPreFloor()) {
+        disableAutoExploreMode(`⛔ 보스 전층(${getCurrentFloorNumber()}층)에서는 자동 탐색을 사용할 수 없습니다.`);
+    }
     if (!isAutoExploreMode && !shouldAutoRest()) return;
 
     autoActionTimer = setTimeout(runAutoActionLoop, Math.max(0, delay));
@@ -364,6 +533,10 @@ async function runAutoActionLoop() {
     if (!hasAutomationEnabled()) return;
     if (window.isDead || window.isCombat || isProcessingTurn || isProcessingAction) return;
     if (isBackgroundAutoExploreRunning()) return;
+    if (isAutoExploreMode && isBossPreFloor()) {
+        disableAutoExploreMode(`⛔ 보스 전층(${getCurrentFloorNumber()}층)에서는 자동 탐색이 허용되지 않습니다.`);
+        if (!shouldAutoRest()) return;
+    }
 
     if (shouldAutoRest()) {
         await sendAction('rest');
@@ -379,6 +552,10 @@ function toggleAutoExploreMode() {
     const toggle = document.getElementById('auto-explore-toggle');
     if (!toggle) return;
     isAutoExploreMode = toggle.checked;
+    if (isAutoExploreMode && isBossPreFloor()) {
+        disableAutoExploreMode(`⛔ 보스 전층(${getCurrentFloorNumber()}층)에서는 자동 탐색을 켤 수 없습니다.`);
+        return;
+    }
     updateAutoExploreModeUI();
 
     if (hasAutomationEnabled()) scheduleAutoAction(250);
@@ -393,6 +570,16 @@ function toggleAutoRestMode() {
 
     if (hasAutomationEnabled()) scheduleAutoAction(250);
     else clearAutoActionTimer();
+}
+
+function disableAutoExploreMode(logMessage = '') {
+    const wasEnabled = isAutoExploreMode;
+    const toggle = document.getElementById('auto-explore-toggle');
+    if (toggle) toggle.checked = false;
+    isAutoExploreMode = false;
+    updateAutoExploreModeUI();
+    if (wasEnabled && logMessage) addLog(logMessage, true);
+    if (!hasAutomationEnabled()) clearAutoActionTimer();
 }
 
 function disableAutoRestMode(logMessage = '') {
@@ -835,6 +1022,7 @@ async function sendAction(actionType) {
     if (isProcessingAction) return;
     isProcessingAction = true;
     clearAutoActionTimer();
+    const hpBeforeAction = (actionType === 'action') ? getCurrentPlayerHp() : 0;
 
     // 🚨 중복 클릭 방지: 통신 중에는 모든 버튼 잠금
     const btns = document.querySelectorAll('.action-container .btn');
@@ -876,6 +1064,7 @@ async function sendAction(actionType) {
                     if (data.status === 'safe') {
                         updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
                         applyRewardUi(data);
+                        renderExploreOutcomeHighlights(data, hpBeforeAction);
                         if (Array.isArray(data.levelup_logs)) {
                             for (const line of data.levelup_logs) addLog(line, true);
                         }
@@ -1179,6 +1368,10 @@ function showStoryModal(storyData) {
 // 자동 탐험
 // ==================================
 async function startAutoExplore() {
+    if (isBossPreFloor()) {
+        addLog(`⛔ 보스 전층(${getCurrentFloorNumber()}층)에서는 자동 탐험을 시작할 수 없습니다.`, true);
+        return;
+    }
     const data = await callApi('auto_explore_start', { method: 'POST' });
     if (data && data.status === 'success') {
         addLog(data.msg, true);

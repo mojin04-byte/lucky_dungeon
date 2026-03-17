@@ -824,6 +824,8 @@ function handle_action(PDO $pdo) {
 				$adaptive_hp = (int)round((($effective_turn_damage * $target_turns) + ($base_mob_hp * 0.12)) * $variance);
 				$min_hp = max(300, (int)floor($base_mob_hp * 0.30));
 				$mob_max_hp = max($min_hp, $adaptive_hp);
+				$mob_atk = (int)max(1, $mob_atk * 2);
+				$mob_max_hp = (int)max(1, $mob_max_hp * 2);
 				$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, mp = ?, is_combat = 1, mob_name = ?, mob_hp = ?, mob_max_hp = ?, mob_atk = ? WHERE uid = ?")
 					->execute(array($adv_floor, $adv_max_floor, $new_mp_common, $mob_name, $mob_max_hp, $mob_max_hp, $mob_atk, $uid));
 				$boss_log = $auto_log . " 보스 <b>{$mob_name}</b> 출현!";
@@ -918,6 +920,10 @@ function handle_action(PDO $pdo) {
 			$adaptive_hp = (int)round((($effective_turn_damage * $target_turns) + ($base_mob_hp * ($is_boss ? 0.12 : 0.08))) * $variance);
 			$min_hp = $is_boss ? max(300, (int)floor($base_mob_hp * 0.30)) : max(60, (int)floor($base_mob_hp * 0.25));
 			$mob_max_hp = max($min_hp, $adaptive_hp);
+			if ($is_boss) {
+				$mob_atk = (int)max(1, $mob_atk * 2);
+				$mob_max_hp = (int)max(1, $mob_max_hp * 2);
+			}
 
 			$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, mp = ?, is_combat = 1, mob_name = ?, mob_hp = ?, mob_max_hp = ?, mob_atk = ? WHERE uid = ?")
 				->execute(array($new_floor, $max_floor, $new_mp_common, $mob_name, $mob_max_hp, $mob_max_hp, $mob_atk, $uid));
@@ -936,6 +942,7 @@ function handle_action(PDO $pdo) {
 			$max_mp = (int)$cmd['max_mp'];
 			$reward_gold = 0;
 			$reward_exp = 0;
+			$trap_damage = 0;
 
 			if ($event_type === 'gold') {
 				$base_gold = rand(30, 140) * max(1, floor($current_floor / 2));
@@ -965,6 +972,7 @@ function handle_action(PDO $pdo) {
 						$log = "🍀 <b>[{$event_title}]</b> 함정을 회피하고 <b>{$reward_gold}G</b> 획득.";
 					} else {
 						$hp = max(1, $hp - $dmg);
+						$trap_damage = (int)$dmg;
 						$log = "🩸 <b>[{$event_title}]</b> {$event_seed} HP <b>-{$dmg}</b>.";
 					}
 				}
@@ -981,6 +989,9 @@ function handle_action(PDO $pdo) {
 			$resp['new_mp'] = $mp;
 			$resp['max_mp'] = $max_mp;
 			$resp['new_floor'] = $new_floor;
+			if ($event_type === 'trap') {
+				$resp['trap_damage'] = (int)$trap_damage;
+			}
 
 			if ($reward_gold > 0 || $reward_exp > 0) {
 				$reward_state = $cmd;
@@ -1047,6 +1058,8 @@ function handle_next_floor(PDO $pdo) {
 			$adaptive_hp = (int)round((($effective_turn_damage * $target_turns) + ($base_mob_hp * 0.12)) * $variance);
 			$min_hp = max(300, (int)floor($base_mob_hp * 0.30));
 			$mob_max_hp = max($min_hp, $adaptive_hp);
+			$mob_atk = (int)max(1, $mob_atk * 2);
+			$mob_max_hp = (int)max(1, $mob_max_hp * 2);
 
 			$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, max_floor = ?, mp = ?, is_combat = 1, mob_name = ?, mob_hp = ?, mob_max_hp = ?, mob_atk = ? WHERE uid = ?")
 				->execute(array($new_floor, $new_max_floor, $new_mp, $mob_name, $mob_max_hp, $mob_max_hp, $mob_atk, $uid));
@@ -1902,6 +1915,17 @@ function handle_auto_explore_start(PDO $pdo) {
 	app_log('handle_auto_explore_start.start');
 	$uid = get_uid_or_fail();
 	try {
+		$stmt = $pdo->prepare("SELECT current_floor FROM tb_commanders WHERE uid = ?");
+		$stmt->execute(array($uid));
+		$cmd = $stmt->fetch();
+		if (!$cmd) throw new Exception('유저 정보 없음');
+
+		$current_floor = (int)$cmd['current_floor'];
+		if ($current_floor > 0 && ($current_floor % 10) === 9) {
+			json_error("보스 전층({$current_floor}층)에서는 자동 탐험을 시작할 수 없습니다. 수동으로 보스전에 진입해 주세요.");
+			return;
+		}
+
 		$pdo->prepare("UPDATE tb_commanders SET auto_explore_start_time = NOW() WHERE uid = ?")->execute(array($uid));
 		echo json_encode(array('status' => 'success', 'msg' => '자동 탐험을 시작했습니다.'));
 	} catch (Exception $e) {

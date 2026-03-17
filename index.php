@@ -17,7 +17,10 @@ try {
 $intro_story_payload = null;
 $background_story = trim((string)($commander['background_story'] ?? ''));
 $intro_story_seen = (int)($commander['intro_story_seen'] ?? 0);
-if ($background_story !== '' && $intro_story_seen === 0) {
+if ($intro_story_seen === 0) {
+	$story_seed = ($background_story !== '')
+		? $background_story
+		: '기록된 과거는 희미하지만, 이름 없는 심연이 사령관을 부르고 있다.';
     $tone_map = [
         'dark_fantasy' => '다크 판타지',
         'high_tension' => '하이텐션',
@@ -32,7 +35,7 @@ if ($background_story !== '' && $intro_story_seen === 0) {
         "주인공 이름은 '{$commander['nickname']}', 직업은 '{$commander['class_type']}', 톤은 '{$tone_label}'이다. " .
         "반드시 '세렌디피티 길드'를 직접 언급하고, 사령관 아이디 '{$commander['nickname']}'와 식별 번호 'UID {$uid}'를 자연스럽게 포함하라. " .
         "플레이어가 곧 1층 탐험을 시작한다는 긴장감을 담고, 마지막 문장은 심연으로 첫 발을 내딛는 장면으로 마무리하라. " .
-        "배경 서사: {$background_story}"
+        "배경 서사: {$story_seed}"
     );
     $_SESSION['story_stream_meta'] = array(
         'is_intro' => 1,
@@ -229,6 +232,7 @@ if ($commander_stat_max > $commander_stat_min) {
                 <p>진행 시간: <span id="auto-explore-timer">0분</span></p>
                 <p>예상 보상: 💰<span id="auto-explore-gold">0</span>G | 📚<span id="auto-explore-exp">0</span>XP</p>
             </div>
+            <p style="font-size: 0.82rem; color: #ffcc80; margin: 0 0 10px 0;">※ 보스 전층(9, 19, 29...층)에서는 자동 탐험을 시작하거나 유지할 수 없습니다.</p>
             <button id="btn-start-auto-explore" class="btn" style="width:100%; background-color: #5a5;" onclick="startAutoExplore()">자동 탐험 시작</button>
             <button id="btn-claim-auto-explore" class="btn" style="width:100%; background-color: #a55; display:none;" onclick="claimAutoExplore()">보상 수령</button>
         </div>
@@ -243,7 +247,7 @@ if ($commander_stat_max > $commander_stat_min) {
                     <label class="switch"><input type="checkbox" id="auto-combat-toggle" onchange="toggleAutoMode()"><span class="slider"></span></label>
                     <span id="auto-status-text" style="color: #4caf50; font-weight: bold; font-size: 0.9rem;">[수동]</span>
                 </div>
-                <div style="display:flex; align-items:center; gap:6px;" title="전투가 끝나면 자동으로 다시 탐색을 이어갑니다.">
+                <div style="display:flex; align-items:center; gap:6px;" title="전투가 끝나면 자동으로 다시 탐색을 이어갑니다. 단, 보스 전층(9,19,29...)에서는 자동 탐색이 강제 중지됩니다.">
                     <span style="color: #aaa; font-size: 0.9rem;">자동 탐험</span>
                     <label class="switch"><input type="checkbox" id="auto-explore-toggle" onchange="toggleAutoExploreMode()"><span class="slider"></span></label>
                     <span id="auto-explore-status-text" style="color: #aaa; font-weight: bold; font-size: 0.9rem;">[OFF]</span>
