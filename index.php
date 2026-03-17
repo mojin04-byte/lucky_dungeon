@@ -102,9 +102,14 @@ if ($commander_stat_max > $commander_stat_min) {
         .center-panel { width: 50%; background: #0a0a0a; display: flex; flex-direction: column; position: relative; }
         .right-panel { width: 25%; background: #111; border-left: 1px solid #333; }
         h2 { color: #ffa500; font-size: 1.2rem; margin-top: 0; border-bottom: 1px solid #333; padding-bottom: 10px; }
-        .section-header { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid #333; }
-        .section-toggle-btn { padding: 7px 10px; font-size: 0.78rem; background: #2f2f2f; border-color: #4b4b4b; min-width: 62px; }
-        .section-toggle-btn:hover { background: #4caf50; color: #000; }
+        .section-header { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid #333; transition: background-color .2s ease, border-color .2s ease; }
+        .section-header.is-collapsed { background: rgba(43, 64, 83, 0.65); border: 1px solid #4f7da1; border-radius: 8px; padding: 8px 10px; }
+        .section-header.is-collapsed h2,
+        .section-header.is-collapsed h3,
+        .section-header.is-collapsed span { color: #b9e4ff !important; }
+        .section-arrow-toggle { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; color:#9fb3c8; background: rgba(255,255,255,0.04); font-size: 0.9rem; font-weight: bold; line-height: 1; cursor: pointer; user-select: none; transition: color .2s ease, background-color .2s ease, transform .2s ease; }
+        .section-arrow-toggle:hover { color:#ffe082; background: rgba(255, 224, 130, 0.14); transform: translateY(-1px); }
+        .section-header.is-collapsed .section-arrow-toggle { color:#80deea; background: rgba(128, 222, 234, 0.18); }
         .collapsible-body { display:block; }
         .collapsible-body.is-collapsed { display:none; }
         .stat-box { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.95rem; border-bottom: 1px dashed #222; padding-bottom: 5px; }
@@ -213,7 +218,7 @@ if ($commander_stat_max > $commander_stat_min) {
                 <span style="color: #ccc; font-size: 1rem; font-weight: bold;">📊 사령관 스탯</span>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span style="font-size:0.8rem; color:#ff9800;">POINT: <span id="stat-points"><?= $commander['stat_points'] ?? 0 ?></span></span>
-                    <button type="button" class="btn section-toggle-btn" data-collapse-target="commander-stats-body">접기</button>
+                    <span class="section-arrow-toggle" data-collapse-target="commander-stats-body" role="button" tabindex="0" aria-label="사령관 스탯 접기">▲</span>
                 </div>
             </div>
         </div>
@@ -239,28 +244,18 @@ if ($commander_stat_max > $commander_stat_min) {
             </div>
         </div>
 
-        <div id="auto-explore-section" style="margin-top: 20px; background: #222; padding: 15px; border-radius: 5px;">
-            <h3 style="color: #ccc; font-size: 1rem; margin:0 0 10px 0;">🏕️ 사령관 자동 탐험</h3>
-            <div id="auto-explore-status-display" style="font-size: 0.9rem; color: #aaa; margin-bottom: 10px; display:none;">
-                <p>진행 시간: <span id="auto-explore-timer">0분</span></p>
-                <p>예상 보상: 💰<span id="auto-explore-gold">0</span>G | 📚<span id="auto-explore-exp">0</span>XP</p>
-            </div>
-            <p style="font-size: 0.82rem; color: #ffcc80; margin: 0 0 10px 0;">※ 보스 전층(9, 19, 29...층)에서는 자동 탐험을 시작하거나 유지할 수 없습니다.</p>
-            <button id="btn-start-auto-explore" class="btn" style="width:100%; background-color: #5a5;" onclick="startAutoExplore()">자동 탐험 시작</button>
-            <button id="btn-claim-auto-explore" class="btn" style="width:100%; background-color: #a55; display:none;" onclick="claimAutoExplore()">보상 수령</button>
-        </div>
     </div>
 
     <div class="panel center-panel">
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #333; background: #111;">
             <h2 style="margin: 0; border: none; padding: 0;">던전 <span id="floor-display"><?= $commander['current_floor'] ?></span> 층</h2>
             <div style="display:flex; align-items:center; justify-content:flex-end; gap:14px; flex-wrap:wrap;">
-                <div style="display:flex; align-items:center; gap:6px;">
+                <div style="display:flex; align-items:center; gap:6px;" title="10층 단위 보스전에서는 자동 전투를 사용할 수 없습니다.">
                     <span style="color: #aaa; font-size: 0.9rem;">자동 전투</span>
                     <label class="switch"><input type="checkbox" id="auto-combat-toggle" onchange="toggleAutoMode()"><span class="slider"></span></label>
                     <span id="auto-status-text" style="color: #4caf50; font-weight: bold; font-size: 0.9rem;">[수동]</span>
                 </div>
-                <div style="display:flex; align-items:center; gap:6px;" title="전투가 끝나면 자동으로 다시 탐색을 이어갑니다. 단, 보스 전층(9,19,29...)에서는 자동 탐색이 강제 중지됩니다.">
+                <div style="display:flex; align-items:center; gap:6px;" title="전투가 끝나면 자동으로 다시 탐색을 이어갑니다. 단, 사령관 레벨이 현재 층보다 6 이상 높으면 자동 탐색이 강제 중지됩니다.">
                     <span style="color: #aaa; font-size: 0.9rem;">자동 탐험</span>
                     <label class="switch"><input type="checkbox" id="auto-explore-toggle" onchange="toggleAutoExploreMode()"><span class="slider"></span></label>
                     <span id="auto-explore-status-text" style="color: #aaa; font-weight: bold; font-size: 0.9rem;">[OFF]</span>
@@ -307,7 +302,7 @@ if ($commander_stat_max > $commander_stat_min) {
         </div>
 
         <div id="dead-actions" class="action-container" style="display: none; background: #300; border-top: 3px solid #ff0000;">
-            <div class="btn" style="background: #ff5252; color: white; grid-column: span 2; font-size: 1.2rem; padding: 20px;" onclick="revive()">✨ 여신의 축복으로 부활 (1층부터)</div>
+            <div class="btn" style="background: #ff5252; color: white; grid-column: span 2; font-size: 1.2rem; padding: 20px;" onclick="revive()">✨ 여신의 축복으로 부활 (현재 층 -5, 최소 1층)</div>
         </div>
     </div>
 
@@ -409,7 +404,7 @@ if ($commander_stat_max > $commander_stat_min) {
     <div class="panel right-panel">
         <div class="section-header" style="margin-top:0;">
             <h2 style="margin:0; padding:0; border:none;">⚔️ 출전 덱 (<span id="deck-count-display">0</span>/5)</h2>
-            <button type="button" class="btn section-toggle-btn" data-collapse-target="deck-list-body">접기</button>
+            <span class="section-arrow-toggle" data-collapse-target="deck-list-body" role="button" tabindex="0" aria-label="출전 덱 접기">▲</span>
         </div>
         <div id="deck-list-body" class="collapsible-body">
             <div id="deck-list"></div>
@@ -417,7 +412,7 @@ if ($commander_stat_max > $commander_stat_min) {
 
         <div class="section-header" style="margin-top:10px;">
             <h3 style="margin:0; color:#cfd8dc; font-size:1rem;">⚙️ 시너지 창</h3>
-            <button type="button" class="btn section-toggle-btn" data-collapse-target="deck-synergy-body">접기</button>
+            <span class="section-arrow-toggle" data-collapse-target="deck-synergy-body" role="button" tabindex="0" aria-label="시너지 창 접기">▲</span>
         </div>
         <div id="deck-synergy-body" class="collapsible-body">
             <div id="deck-synergy-panel" title="층 구간(초반/중반/후반)에 따라 시너지 수치가 달라집니다. 전투 시작 시 덱 기준으로 자동 적용됩니다." style="margin:8px 0 10px; padding:10px; background:#1b1b1b; border:1px solid #3b3b3b; border-radius:6px;">
@@ -431,7 +426,7 @@ if ($commander_stat_max > $commander_stat_min) {
             <h2 style="margin:0; padding:0; border:none;">🎒 보유 영웅</h2>
             <div style="display:flex; align-items:center; gap:8px;">
                 <div class="btn" style="padding:8px 12px; font-size:0.85rem; background:#673ab7; white-space:nowrap;" onclick="openCombineModal()">조합/진화 🔮</div>
-                <button type="button" class="btn section-toggle-btn" data-collapse-target="hero-list-body">접기</button>
+                <span class="section-arrow-toggle" data-collapse-target="hero-list-body" role="button" tabindex="0" aria-label="보유 영웅 접기">▲</span>
             </div>
         </div>
         <div id="hero-list-body" class="collapsible-body">

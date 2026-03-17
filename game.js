@@ -6,7 +6,6 @@ let combatTimer = null;
 let autoActionTimer = null;
 let isProcessingTurn = false;
 let isProcessingAction = false;
-let autoExploreTimer = null;
 const MONSTER_HP_STEP_DELAY = 150;
 const AUTO_ACTION_DELAY = 450;
 const AUTO_REST_HP_THRESHOLD = 0.45;
@@ -85,7 +84,7 @@ function applyButtonTooltips(root = document) {
 
 function updateCollapseToggleLabel(button, isCollapsed) {
     if (!button) return;
-    button.innerText = isCollapsed ? '펼치기' : '접기';
+    button.textContent = isCollapsed ? '▼' : '▲';
     button.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
 }
 
@@ -96,7 +95,11 @@ function setCollapsedState(targetId, isCollapsed) {
 
     body.classList.toggle('is-collapsed', !!isCollapsed);
     const relatedButtons = document.querySelectorAll(`[data-collapse-target="${targetId}"]`);
-    relatedButtons.forEach((button) => updateCollapseToggleLabel(button, !!isCollapsed));
+    relatedButtons.forEach((button) => {
+        updateCollapseToggleLabel(button, !!isCollapsed);
+        const header = button.closest('.section-header');
+        if (header) header.classList.toggle('is-collapsed', !!isCollapsed);
+    });
 
     try {
         localStorage.setItem(`${COLLAPSE_STORAGE_PREFIX}${targetId}`, isCollapsed ? '1' : '0');
@@ -119,7 +122,14 @@ function initCollapsiblePanels() {
     toggleButtons.forEach((button) => {
         const targetId = button.getAttribute('data-collapse-target');
         if (!targetId) return;
+        button.setAttribute('aria-controls', targetId);
         button.addEventListener('click', () => toggleCollapsedState(targetId));
+        button.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleCollapsedState(targetId);
+            }
+        });
     });
 
     const initializedTargets = new Set();
@@ -382,9 +392,34 @@ function getCurrentFloorNumber() {
     return parseFloorNumber(floorEl ? floorEl.innerText : 0);
 }
 
-function isBossPreFloor(floor = getCurrentFloorNumber()) {
-    const safeFloor = Math.max(0, Number(floor) || 0);
-    return safeFloor > 0 && (safeFloor % 10) === 9;
+function isBossFloor(floor = getCurrentFloorNumber()) {
+    const safeFloor = Math.max(1, Number(floor) || 1);
+    return (safeFloor % 10) === 0;
+}
+
+function isBossMob(mobName = '') {
+    return String(mobName || '').includes('[보스]');
+}
+
+function isBossAutoCombatRestricted(mobName = window.currentMobName || '', floor = getCurrentFloorNumber()) {
+    return isBossFloor(floor) && isBossMob(mobName);
+}
+
+function getCurrentCommanderLevel() {
+    const levelEl = document.getElementById('level-display');
+    return parseFloorNumber(levelEl ? levelEl.innerText : 1);
+}
+
+function isAutoExploreBlockedByLevel(level = getCurrentCommanderLevel(), floor = getCurrentFloorNumber()) {
+    const safeLevel = Math.max(1, Number(level) || 1);
+    const safeFloor = Math.max(1, Number(floor) || 1);
+    return safeLevel >= (safeFloor + 6);
+}
+
+function getAutoExploreBlockedMessage(actionText = '중지되었습니다.') {
+    const level = getCurrentCommanderLevel();
+    const floor = getCurrentFloorNumber();
+    return `⛔ 사령관 레벨(${level})이 현재 층(${floor})보다 6 이상 높아 자동 탐색이 ${actionText}`;
 }
 
 function updateFloorDisplay(newFloor, newMaxFloor) {
@@ -394,8 +429,8 @@ function updateFloorDisplay(newFloor, newMaxFloor) {
 
     if (floorEl && parsedNewFloor > 0) {
         floorEl.innerText = String(parsedNewFloor);
-        if (isAutoExploreMode && isBossPreFloor(parsedNewFloor)) {
-            disableAutoExploreMode(`⛔ ${parsedNewFloor}층은 보스 전층입니다. 자동 탐색이 중지되었습니다. 보스전에 앞서 수동으로 진행해 주세요.`);
+        if (isAutoExploreMode && isAutoExploreBlockedByLevel(getCurrentCommanderLevel(), parsedNewFloor)) {
+            disableAutoExploreMode(getAutoExploreBlockedMessage('중지되었습니다.'));
         }
     }
 
@@ -541,12 +576,6 @@ function hasAutomationEnabled() {
     return isAutoExploreMode || isAutoRestMode;
 }
 
-function isBackgroundAutoExploreRunning() {
-    const statusDisplay = document.getElementById('auto-explore-status-display');
-    const claimBtn = document.getElementById('btn-claim-auto-explore');
-    return Boolean(statusDisplay && claimBtn && statusDisplay.style.display !== 'none' && claimBtn.style.display !== 'none');
-}
-
 function updateAutoExploreModeUI() {
     const statusEl = document.getElementById('auto-explore-status-text');
     if (!statusEl) return;
@@ -579,9 +608,8 @@ function scheduleAutoAction(delay = AUTO_ACTION_DELAY) {
     clearAutoActionTimer();
     if (!hasAutomationEnabled()) return;
     if (window.isDead || window.isCombat || isProcessingTurn || isProcessingAction) return;
-    if (isBackgroundAutoExploreRunning()) return;
-    if (isAutoExploreMode && isBossPreFloor()) {
-        disableAutoExploreMode(`⛔ 보스 전층(${getCurrentFloorNumber()}층)에서는 자동 탐색을 사용할 수 없습니다.`);
+    if (isAutoExploreMode && isAutoExploreBlockedByLevel()) {
+        disableAutoExploreMode(getAutoExploreBlockedMessage('사용할 수 없습니다.'));
     }
     if (!isAutoExploreMode && !shouldAutoRest()) return;
 
@@ -592,9 +620,8 @@ async function runAutoActionLoop() {
     clearAutoActionTimer();
     if (!hasAutomationEnabled()) return;
     if (window.isDead || window.isCombat || isProcessingTurn || isProcessingAction) return;
-    if (isBackgroundAutoExploreRunning()) return;
-    if (isAutoExploreMode && isBossPreFloor()) {
-        disableAutoExploreMode(`⛔ 보스 전층(${getCurrentFloorNumber()}층)에서는 자동 탐색이 허용되지 않습니다.`);
+    if (isAutoExploreMode && isAutoExploreBlockedByLevel()) {
+        disableAutoExploreMode(getAutoExploreBlockedMessage('허용되지 않습니다.'));
         if (!shouldAutoRest()) return;
     }
 
@@ -612,8 +639,8 @@ function toggleAutoExploreMode() {
     const toggle = document.getElementById('auto-explore-toggle');
     if (!toggle) return;
     isAutoExploreMode = toggle.checked;
-    if (isAutoExploreMode && isBossPreFloor()) {
-        disableAutoExploreMode(`⛔ 보스 전층(${getCurrentFloorNumber()}층)에서는 자동 탐색을 켤 수 없습니다.`);
+    if (isAutoExploreMode && isAutoExploreBlockedByLevel()) {
+        disableAutoExploreMode(getAutoExploreBlockedMessage('켜둘 수 없습니다.'));
         return;
     }
     updateAutoExploreModeUI();
@@ -890,9 +917,12 @@ function exitToExploreState() {
 }
 
 function enterEncounterState(mobName, mobMaxHp) {
-    if (mobName.includes('[보스]')) {
+    if (isBossMob(mobName)) {
         document.body.classList.add('boss-bg');
         addLog(`<span style="color:red; font-size:1.1rem; font-weight:bold; text-shadow:0 0 5px red;">⚠️ 경고: 강력한 보스의 살기가 느껴집니다!</span>`);
+        if (isBossAutoCombatRestricted(mobName)) {
+            addLog('⛔ 10층 보스전에서는 자동 전투를 사용할 수 없습니다. 수동 전투로 진행해 주세요.', true);
+        }
     }
     enterCombatState(mobName, mobMaxHp);
 }
@@ -902,6 +932,10 @@ function enterCombatState(mobName, mobMaxHp) {
     clearAutoActionTimer();
     if (!window.currentMobHp || window.currentMobHp <= 0) window.currentMobHp = mobMaxHp;
     setBattleStage(BATTLE_STAGE.COMBAT, mobName, mobMaxHp);
+    if (isAutoMode && isBossAutoCombatRestricted(mobName)) {
+        disableAutoCombatMode();
+        return;
+    }
     if (isAutoMode) doCombatTurn();
 }
 
@@ -910,10 +944,34 @@ function clearCombatTimer() {
     isProcessingTurn = false;
 }
 
+function updateAutoCombatModeUI() {
+    const statusEl = document.getElementById('auto-status-text');
+    if (!statusEl) return;
+    statusEl.innerText = isAutoMode ? '[자동]' : '[수동]';
+    statusEl.style.color = isAutoMode ? '#4caf50' : '#aaa';
+}
+
+function disableAutoCombatMode(logMessage = '') {
+    const toggle = document.getElementById('auto-combat-toggle');
+    const wasEnabled = isAutoMode;
+    if (toggle) toggle.checked = false;
+    isAutoMode = false;
+    updateAutoCombatModeUI();
+    if (wasEnabled && logMessage) addLog(logMessage, true);
+}
+
 function toggleAutoMode() {
-    isAutoMode = document.getElementById('auto-combat-toggle').checked;
-    document.getElementById('auto-status-text').innerText = isAutoMode ? '[자동]' : '[수동]';
-    if(isAutoMode && window.isCombat && !isProcessingTurn) doCombatTurn();
+    const toggle = document.getElementById('auto-combat-toggle');
+    if (!toggle) return;
+
+    isAutoMode = toggle.checked;
+    if (isAutoMode && window.isCombat && isBossAutoCombatRestricted(window.currentMobName || '')) {
+        disableAutoCombatMode('⛔ 10층 보스전에서는 자동 전투를 사용할 수 없습니다. 수동 전투로 진행해 주세요.');
+        return;
+    }
+
+    updateAutoCombatModeUI();
+    if (isAutoMode && window.isCombat && !isProcessingTurn) doCombatTurn();
 }
 
 // ==================================
@@ -1066,7 +1124,12 @@ async function attemptFlee() {
     const data = await callApi('flee');
     if (data) {
         addLog(data.log);
-        if (data.status === 'success') exitToExploreState();
+        if (data.status === 'success') {
+            if (data.new_floor !== undefined) {
+                updateFloorDisplay(data.new_floor, data.new_max_floor);
+            }
+            exitToExploreState();
+        }
         else if (data.new_hp <= 0) enterDeadState();
         else enterCombatState(window.currentMobName, window.currentMobMaxHp);
     }
@@ -1241,7 +1304,7 @@ async function revive() {
     if (data && data.status === 'success') {
         window.isDead = false;
         addLog(data.log, true);
-        updateFloorDisplay(1);
+        updateFloorDisplay(data.new_floor !== undefined ? data.new_floor : 1);
         updatePlayerBars(data.max_hp, data.max_hp, data.max_mp, data.max_mp);
         exitToExploreState();
         toggleEquip(0, -1);
@@ -1424,91 +1487,6 @@ function showStoryModal(storyData) {
     };
 }
 
-// ==================================
-// 자동 탐험
-// ==================================
-async function startAutoExplore() {
-    if (isBossPreFloor()) {
-        addLog(`⛔ 보스 전층(${getCurrentFloorNumber()}층)에서는 자동 탐험을 시작할 수 없습니다.`, true);
-        return;
-    }
-    const data = await callApi('auto_explore_start', { method: 'POST' });
-    if (data && data.status === 'success') {
-        addLog(data.msg, true);
-        updateAutoExploreUI(true);
-    } else if (data) {
-        addLog(data.msg, true);
-    }
-}
-
-async function claimAutoExplore() {
-    const data = await callApi('auto_explore_claim', { method: 'POST' });
-    if (data && data.status === 'success') {
-        const prevLevel = Number(document.getElementById('level-display').innerText || 1);
-        addLog(data.log, true);
-        if (Array.isArray(data.levelup_logs)) {
-            for (const lvlog of data.levelup_logs) addLog(lvlog, true);
-        }
-        if (data.new_level !== undefined && data.new_exp !== undefined) {
-            updateExpBar(data.new_level, data.new_exp, data.exp_to_next);
-            const gainCount = Number(data.levelup_count || (Array.isArray(data.levelup_logs) ? data.levelup_logs.length : 0));
-            if (Number(data.new_level) > prevLevel) {
-                showLevelUpEffect(prevLevel, Number(data.new_level), gainCount || 1);
-            }
-        }
-        if (data.new_stat_points !== undefined) {
-            updateStatUI(data.new_stat_points);
-        }
-        if (data.new_hp !== undefined && data.new_max_hp !== undefined && data.new_mp !== undefined && data.new_max_mp !== undefined) {
-            updatePlayerBars(data.new_hp, data.new_max_hp, data.new_mp, data.new_max_mp);
-        }
-        if (data.rewards && data.rewards.gold !== undefined) {
-            const goldEl = document.getElementById('gold-display');
-            const currentGold = Number((goldEl && goldEl.innerText || '0').replace(/,/g, '')) || 0;
-            goldEl.innerText = (currentGold + Number(data.rewards.gold)).toLocaleString();
-        }
-        updateAutoExploreUI(false);
-        toggleEquip(0,-1); 
-    } else if(data) {
-        addLog(data.msg, true);
-    }
-}
-
-function updateAutoExploreUI(isExploring, data) {
-    const statusDisplay = document.getElementById('auto-explore-status-display');
-    const startBtn = document.getElementById('btn-start-auto-explore');
-    const claimBtn = document.getElementById('btn-claim-auto-explore');
-    const exploreActions = document.getElementById('explore-actions');
-
-    if (isExploring) {
-        clearAutoActionTimer();
-        statusDisplay.style.display = 'block';
-        startBtn.style.display = 'none';
-        claimBtn.style.display = 'block';
-        exploreActions.style.display = 'none';
-        if (data) {
-            document.getElementById('auto-explore-timer').innerText = `${data.elapsed_minutes}분`;
-            document.getElementById('auto-explore-gold').innerText = data.rewards.gold.toLocaleString();
-            document.getElementById('auto-explore-exp').innerText = data.rewards.exp.toLocaleString();
-        }
-    } else {
-        statusDisplay.style.display = 'none';
-        startBtn.style.display = 'block';
-        claimBtn.style.display = 'none';
-        if(!window.isDead && !window.isCombat) {
-            exploreActions.style.display = 'grid';
-            scheduleAutoAction(AUTO_ACTION_DELAY);
-        }
-    }
-}
-
-async function checkAutoExploreStatus() {
-    const data = await callApi('auto_explore_status');
-    if(data) {
-        updateAutoExploreUI(data.status === 'exploring', data);
-    }
-}
-
 function setupStatButtons() {
     const buttons = document.querySelectorAll('.btn-stat-up');
     buttons.forEach(btn => {
@@ -1561,9 +1539,6 @@ window.addEventListener('DOMContentLoaded', () => {
         setBattleStage(BATTLE_STAGE.EXPLORE);
     }
     
-    checkAutoExploreStatus();
-    autoExploreTimer = setInterval(checkAutoExploreStatus, 5000);
-
     if (window.initialIntroStory) {
         setTimeout(() => showStoryModal(window.initialIntroStory), 500);
     }

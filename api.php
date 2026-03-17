@@ -2065,21 +2065,18 @@ function handle_flee(PDO $pdo) {
 		$cmd = $stmt->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
 		if ((int)$cmd['is_combat'] === 0) { $pdo->rollBack(); json_error('도망칠 적이 없습니다.'); return; }
-		if (strpos((string)$cmd['mob_name'], '[보스]') !== false) {
-			$pdo->rollBack();
-			echo json_encode(array('status' => 'fail', 'log' => '보스의 강력한 기운에 짓눌려 도망칠 수 없습니다!', 'new_hp' => (int)$cmd['hp'], 'max_hp' => (int)$cmd['max_hp']));
-			return;
-		}
 
 		$chance = 40 + (int)$cmd['stat_agi'];
 		if (rand(1, 100) <= $chance) {
-			$log = "💨 <b>[도주 성공!]</b> {$cmd['mob_name']}에게서 도망쳤습니다.";
-			$pdo->prepare("UPDATE tb_commanders SET is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")->execute(array($uid));
+			$current_floor = max(1, (int)$cmd['current_floor']);
+			$new_floor = max(1, $current_floor - 1);
+			$log = "💨 <b>[도주 성공!]</b> {$cmd['mob_name']}에게서 도망쳤고 {$new_floor}층으로 후퇴했습니다.";
+			$pdo->prepare("UPDATE tb_commanders SET current_floor = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")->execute(array($new_floor, $uid));
 			reset_orc_frenzy_state();
 			unset($_SESSION['combat_state']);
 			$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
 			$pdo->commit();
-			echo json_encode(array('status' => 'success', 'log' => $log));
+			echo json_encode(array('status' => 'success', 'log' => $log, 'new_floor' => $new_floor, 'new_max_floor' => (int)$cmd['max_floor']));
 		} else {
 			$dmg = rand(10, 20);
 			$new_hp = max(0, (int)$cmd['hp'] - $dmg);
@@ -2744,122 +2741,6 @@ function handle_synthesize(PDO $pdo) {
 	}
 }
 
-function handle_auto_explore_start(PDO $pdo) {
-	app_log('handle_auto_explore_start.start');
-	$uid = get_uid_or_fail();
-	try {
-		$stmt = $pdo->prepare("SELECT current_floor FROM tb_commanders WHERE uid = ?");
-		$stmt->execute(array($uid));
-		$cmd = $stmt->fetch();
-		if (!$cmd) throw new Exception('유저 정보 없음');
-
-		$current_floor = (int)$cmd['current_floor'];
-		if ($current_floor > 0 && ($current_floor % 10) === 9) {
-			json_error("보스 전층({$current_floor}층)에서는 자동 탐험을 시작할 수 없습니다. 수동으로 보스전에 진입해 주세요.");
-			return;
-		}
-
-		$pdo->prepare("UPDATE tb_commanders SET auto_explore_start_time = NOW() WHERE uid = ?")->execute(array($uid));
-		echo json_encode(array('status' => 'success', 'msg' => '자동 탐험을 시작했습니다.'));
-	} catch (Exception $e) {
-		json_error($e->getMessage());
-	}
-}
-
-function handle_auto_explore_status(PDO $pdo) {
-	app_log('handle_auto_explore_status.start');
-	$uid = get_uid_or_fail();
-	try {
-		$stmt = $pdo->prepare("SELECT auto_explore_start_time, current_floor, level FROM tb_commanders WHERE uid = ?");
-		$stmt->execute(array($uid));
-		$cmd = $stmt->fetch();
-
-		if ($cmd && $cmd['auto_explore_start_time'] !== null) {
-			$start = new DateTime($cmd['auto_explore_start_time']);
-			$now = new DateTime();
-			$int = $now->diff($start);
-			$minutes = ($int->days * 24 * 60) + ($int->h * 60) + $int->i;
-			$bonus = max(1, floor((int)$cmd['current_floor'] / 10));
-			$gold = $minutes * 10 * $bonus;
-			$exp = $minutes * 5 * $bonus;
-			$ovr = max(0, (int)$cmd['level'] - (int)$cmd['current_floor']);
-			if ($ovr >= 5) {
-				$exp = (int)floor($exp * 0.5);
-			}
-			$exp = (int)floor($exp * 0.5);
-			echo json_encode(array('status' => 'exploring', 'elapsed_minutes' => $minutes, 'rewards' => array('gold' => $gold, 'exp' => $exp)));
-		} else {
-			echo json_encode(array('status' => 'not_exploring'));
-		}
-	} catch (Exception $e) {
-		json_error($e->getMessage());
-	}
-}
-
-function handle_auto_explore_claim(PDO $pdo) {
-	app_log('handle_auto_explore_claim.start');
-	$uid = get_uid_or_fail();
-	try {
-		$pdo->beginTransaction();
-		$st = $pdo->prepare("SELECT * FROM tb_commanders WHERE uid = ? FOR UPDATE");
-		$st->execute(array($uid));
-		$cmd = $st->fetch();
-		if (!$cmd || $cmd['auto_explore_start_time'] === null) {
-			$pdo->rollBack();
-			json_error('진행 중인 자동 탐험이 없습니다.');
-			return;
-		}
-
-		$start = new DateTime($cmd['auto_explore_start_time']);
-		$now = new DateTime();
-		$int = $now->diff($start);
-		$minutes = ($int->days * 24 * 60) + ($int->h * 60) + $int->i;
-		if ($minutes < 1) {
-			$pdo->rollBack();
-			json_error('최소 1분 이상 탐험해야 보상을 받을 수 있습니다.');
-			return;
-		}
-
-		$bonus = max(1, floor((int)$cmd['current_floor'] / 10));
-		$gold = $minutes * 10 * $bonus;
-		$exp = $minutes * 5 * $bonus;
-		$ovr = max(0, (int)$cmd['level'] - (int)$cmd['current_floor']);
-		if ($ovr >= 5) {
-			$exp = (int)floor($exp * 0.5);
-		}
-		$exp = (int)floor($exp * 0.5);
-		$pdo->prepare("UPDATE tb_commanders SET gold = gold + ?, auto_explore_start_time = NULL WHERE uid = ?")->execute(array($gold, $uid));
-		$prog = apply_commander_exp_gain($pdo, $uid, $cmd, $exp);
-		$log = "🏕️ <b>[자동 탐험 종료]</b> {$minutes}분 탐험. <span style='color:#ffd700;'>{$gold}G</span>, <span style='color:#b388ff;'>{$exp}XP</span> 획득!";
-		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
-		if (!empty($prog['levelup_logs'])) {
-			foreach ($prog['levelup_logs'] as $lvlog) {
-				$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $lvlog));
-			}
-		}
-		$pdo->commit();
-
-		echo json_encode(array(
-			'status' => 'success',
-			'log' => $log,
-			'rewards' => array('gold' => $gold, 'exp' => $exp),
-			'levelup_count' => count($prog['levelup_logs']),
-			'new_level' => (int)$prog['level'],
-			'new_exp' => (int)$prog['exp'],
-			'exp_to_next' => (int)$prog['exp_to_next'],
-			'new_stat_points' => (int)$prog['stat_points'],
-			'new_hp' => (int)$prog['hp'],
-			'new_max_hp' => (int)$prog['max_hp'],
-			'new_mp' => (int)$prog['mp'],
-			'new_max_mp' => (int)$prog['max_mp'],
-			'levelup_logs' => $prog['levelup_logs']
-		));
-	} catch (Exception $e) {
-		if ($pdo->inTransaction()) $pdo->rollBack();
-		json_error($e->getMessage());
-	}
-}
-
 function handle_equip(PDO $pdo) {
 	app_log('handle_equip.start');
 	$uid = get_uid_or_fail();
@@ -3479,20 +3360,21 @@ function handle_restart(PDO $pdo) {
 	$uid = get_uid_or_fail();
 	try {
 		$pdo->beginTransaction();
-		$stmt = $pdo->prepare("SELECT max_hp, max_mp FROM tb_commanders WHERE uid = ? FOR UPDATE");
+		$stmt = $pdo->prepare("SELECT max_hp, max_mp, current_floor FROM tb_commanders WHERE uid = ? FOR UPDATE");
 		$stmt->execute(array($uid));
 		$cmd = $stmt->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
+		$new_floor = max(1, (int)$cmd['current_floor'] - 5);
 
-		$sql = "UPDATE tb_commanders SET hp = ?, mp = ?, current_floor = 1, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?";
-		$pdo->prepare($sql)->execute(array((int)$cmd['max_hp'], (int)$cmd['max_mp'], $uid));
+		$sql = "UPDATE tb_commanders SET hp = ?, mp = ?, current_floor = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?";
+		$pdo->prepare($sql)->execute(array((int)$cmd['max_hp'], (int)$cmd['max_mp'], $new_floor, $uid));
 		unset($_SESSION['combat_state']);
 
-		$log = "✨ 여신의 축복으로 부활했습니다. 1층에서 다시 시작합니다.";
+		$log = "✨ 여신의 축복으로 부활했습니다. {$new_floor}층에서 다시 시작합니다.";
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
 		$pdo->commit();
 
-		echo json_encode(array('status' => 'success', 'log' => $log, 'max_hp' => (int)$cmd['max_hp'], 'max_mp' => (int)$cmd['max_mp']));
+		echo json_encode(array('status' => 'success', 'log' => $log, 'new_floor' => $new_floor, 'max_hp' => (int)$cmd['max_hp'], 'max_mp' => (int)$cmd['max_mp']));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
 		json_error($e->getMessage());
@@ -3523,9 +3405,6 @@ switch ($action) {
 	case 'hero_levelup': handle_hero_levelup($pdo); break;
 	case 'relic_info': handle_relic_info($pdo); break;
 	case 'relic_upgrade': handle_relic_upgrade($pdo); break;
-	case 'auto_explore_start': handle_auto_explore_start($pdo); break;
-	case 'auto_explore_status': handle_auto_explore_status($pdo); break;
-	case 'auto_explore_claim': handle_auto_explore_claim($pdo); break;
 	case 'next_floor': handle_next_floor($pdo); break;
 	case 'expedition_info': handle_expedition_info($pdo); break;
 	case 'start_expedition': handle_start_expedition($pdo); break;
