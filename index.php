@@ -395,6 +395,11 @@ if ($commander_stat_max > $commander_stat_min) {
 
     <div class="panel right-panel">
         <h2>⚔️ 출전 덱 (<span id="deck-count-display">0</span>/5)</h2>
+        <div id="deck-synergy-panel" title="출전 덱 시너지: 근거리 영웅 4명 이상 공격력 +50%, 마법 영웅 4명 이상 공격력 +50% (중첩 가능)" style="margin:8px 0 10px; padding:10px; background:#1b1b1b; border:1px solid #3b3b3b; border-radius:6px;">
+            <div style="font-size:0.85rem; color:#cfd8dc; font-weight:bold;">⚙️ 출전 덱 시너지</div>
+            <div style="font-size:0.78rem; color:#9e9e9e; margin-top:4px;">근거리 영웅 4명 이상: 공격력 +50%</div>
+            <div style="font-size:0.78rem; color:#9e9e9e;">마법 영웅 4명 이상: 공격력 +50%</div>
+        </div>
         <div id="deck-list"></div>
         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid #333;">
             <h2 style="margin:0; padding:0; border:none;">🎒 보유 영웅</h2>

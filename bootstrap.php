@@ -273,6 +273,122 @@ if (is_array($hero_data)) {
 }
 
 // ==========================================
+// 영웅 특성(DB) 마이그레이션 및 로드
+// ==========================================
+$hero_traits_map = array();
+try {
+    if (!table_exists($pdo, 'tb_hero_traits')) {
+        $pdo->exec("CREATE TABLE `tb_hero_traits` (
+            `hero_name` VARCHAR(120) NOT NULL,
+            `attack_type` VARCHAR(20) NOT NULL COMMENT '물리/마법',
+            `attack_range` VARCHAR(20) NOT NULL COMMENT '근거리/원거리',
+            `race` VARCHAR(40) NOT NULL COMMENT '종족',
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`hero_name`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT '영웅 전투 특성 데이터';");
+    }
+
+    $hero_traits_csv = trim("
+산적,물리,근거리,인간
+물의정령,마법,원거리,정령
+야만인,물리,근거리,인간
+투척병,물리,원거리,인간
+궁수,물리,원거리,인간
+악마병사,마법,근거리,악마
+샌드맨,마법,근거리,정령
+성기사,물리,근거리,인간
+충격로봇,마법,근거리,로봇
+레인저,물리,원거리,인간
+늑대전사,물리,근거리,동물
+독수리장군,물리,원거리,동물
+사냥꾼,물리,원거리,인간
+나무,마법,원거리,정령
+전기로봇,마법,원거리,로봇
+보안관,물리,원거리,인간
+폭풍거인,마법,근거리,정령
+호랑이사부,물리,근거리,동물
+워머신,물리,원거리,로봇
+닌자,물리,근거리,인간
+중력자탄,마법,원거리,로봇
+오크주술사,마법,원거리,오크
+펄스생성기,마법,원거리,로봇
+냥법사,마법,원거리,동물
+밤바,물리,근거리,인간
+콜디,마법,원거리,정령
+랜슬롯,마법,근거리,인간
+아이언미야옹,마법,원거리,로봇
+블롭,물리,근거리,악마
+드래곤,마법,원거리,드래곤
+모노폴리맨,물리,원거리,인간
+마마,마법,원거리,악마
+개구리 왕자,마법,원거리,동물
+개구리왕자,마법,원거리,동물
+배트맨,물리,근거리,인간
+베인,물리,원거리,인간
+인디,물리,원거리,인간
+와트,마법,원거리,로봇
+타르,물리,근거리,악마
+로켓츄,마법,원거리,동물
+우치,마법,원거리,인간
+지지,마법,원거리,동물
+마스터 쿤,물리,근거리,동물
+초나,마법,원거리,악마
+펭귄악사,마법,원거리,동물
+헤일리,물리,원거리,인간
+아토,마법,원거리,인간
+로카,물리,원거리,인간
+골라조,물리,원거리,인간
+각성 헤일리,물리,원거리,인간
+사신 다이안 (사신 개구리 승천형),마법,원거리,동물
+그랜드 마마,마법,원거리,악마
+원시 밤바,물리,근거리,인간
+귀신 닌자,물리,근거리,인간
+시공 아토,마법,원거리,인간
+닥터 펄스,마법,원거리,로봇
+탑 베인,물리,원거리,인간
+마왕 드래곤,마법,원거리,드래곤
+슈퍼 중력자탄,마법,원거리,로봇
+캡틴 로카,물리,원거리,인간
+에이스 배트맨,물리,근거리,인간
+소음킹 펭귄악사,마법,원거리,동물
+아이엠 미야옹,마법,원거리,로봇
+보스 골라조,물리,원거리,인간
+블롭단,물리,근거리,악마
+여왕 콜디,마법,원거리,정령
+불멸 쿤,물리,근거리,동물
+");
+
+    $upsert_trait = $pdo->prepare("INSERT INTO tb_hero_traits (hero_name, attack_type, attack_range, race) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE attack_type = VALUES(attack_type), attack_range = VALUES(attack_range), race = VALUES(race)");
+    $rows = preg_split('/\r\n|\n|\r/', $hero_traits_csv);
+    foreach ($rows as $line) {
+        $line = trim((string)$line);
+        if ($line === '') continue;
+        $parts = array_map('trim', explode(',', $line));
+        if (count($parts) < 4) continue;
+        $hero_name = $parts[0];
+        $attack_type = $parts[1];
+        $attack_range = $parts[2];
+        $race = $parts[3];
+        if ($hero_name === '' || $attack_type === '' || $attack_range === '' || $race === '') continue;
+        $upsert_trait->execute(array($hero_name, $attack_type, $attack_range, $race));
+    }
+
+    $trait_rows = $pdo->query("SELECT hero_name, attack_type, attack_range, race FROM tb_hero_traits")->fetchAll();
+    foreach ($trait_rows as $tr) {
+        $name = isset($tr['hero_name']) ? trim((string)$tr['hero_name']) : '';
+        if ($name === '') continue;
+        $hero_traits_map[$name] = array(
+            'attack_type' => isset($tr['attack_type']) ? trim((string)$tr['attack_type']) : '미확인',
+            'attack_range' => isset($tr['attack_range']) ? trim((string)$tr['attack_range']) : '미확인',
+            'race' => isset($tr['race']) ? trim((string)$tr['race']) : '미확인'
+        );
+    }
+} catch (\PDOException $e) {
+    $hero_traits_map = array();
+    error_log("영웅 특성 마이그레이션 실패: " . $e->getMessage());
+}
+
+// ==========================================
 // 추가 마이그레이션 (영웅 스킬 시스템)
 // ==========================================
 try {

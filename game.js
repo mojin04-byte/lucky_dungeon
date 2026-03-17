@@ -52,6 +52,10 @@ async function callApi(action, options = {}) {
 function updateInventoryUI(data) {
     if (!data) return;
     if (data.deck_html !== undefined) document.getElementById('deck-list').innerHTML = data.deck_html;
+    if (data.deck_synergy_html !== undefined) {
+        const panel = document.getElementById('deck-synergy-panel');
+        if (panel) panel.innerHTML = data.deck_synergy_html;
+    }
     if (data.inv_html !== undefined) document.getElementById('hero-list').innerHTML = data.inv_html;
     if (data.deck_count !== undefined) document.getElementById('deck-count-display').innerText = data.deck_count;
     if (data.new_gold !== undefined) document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();

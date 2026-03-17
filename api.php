@@ -315,6 +315,110 @@ function tick_player_buffs(&$logs, $skip_keys = array()) {
 	}
 }
 
+function get_hero_traits($hero_name) {
+	global $hero_traits_map;
+
+	$default = array(
+		'attack_type' => '미확인',
+		'attack_range' => '미확인',
+		'race' => '미확인',
+		'known' => false,
+	);
+
+	$name = trim((string)$hero_name);
+	if ($name === '') return $default;
+
+	if (is_array($hero_traits_map) && isset($hero_traits_map[$name])) {
+		$row = $hero_traits_map[$name];
+		return array(
+			'attack_type' => isset($row['attack_type']) ? (string)$row['attack_type'] : '미확인',
+			'attack_range' => isset($row['attack_range']) ? (string)$row['attack_range'] : '미확인',
+			'race' => isset($row['race']) ? (string)$row['race'] : '미확인',
+			'known' => true,
+		);
+	}
+
+	$alias = str_replace(' ', '', $name);
+	if ($alias !== $name && is_array($hero_traits_map) && isset($hero_traits_map[$alias])) {
+		$row = $hero_traits_map[$alias];
+		return array(
+			'attack_type' => isset($row['attack_type']) ? (string)$row['attack_type'] : '미확인',
+			'attack_range' => isset($row['attack_range']) ? (string)$row['attack_range'] : '미확인',
+			'race' => isset($row['race']) ? (string)$row['race'] : '미확인',
+			'known' => true,
+		);
+	}
+
+	return $default;
+}
+
+function get_hero_unit_count($hero) {
+	if (isset($hero['equipped_count'])) return max(1, (int)$hero['equipped_count']);
+	if (isset($hero['quantity'])) return max(1, (int)$hero['quantity']);
+	return 1;
+}
+
+function build_deck_synergy_summary($heroes, $assume_equipped = false) {
+	$summary = array(
+		'total_units' => 0,
+		'melee_units' => 0,
+		'magic_units' => 0,
+		'attack_multiplier' => 1.0,
+		'attack_bonus_percent' => 0,
+		'active_effects' => array(),
+	);
+
+	foreach ($heroes as $hero) {
+		$is_equipped = $assume_equipped || ((int)(isset($hero['is_equipped']) ? $hero['is_equipped'] : 0) === 1);
+		$is_expedition = ((int)(isset($hero['is_on_expedition']) ? $hero['is_on_expedition'] : 0) === 1);
+		if (!$is_equipped || $is_expedition) continue;
+
+		$count = get_hero_unit_count($hero);
+		$summary['total_units'] += $count;
+
+		$traits = get_hero_traits(isset($hero['hero_name']) ? $hero['hero_name'] : '');
+		if (in_array($traits['attack_range'], array('근거리', '근접'), true)) $summary['melee_units'] += $count;
+		if (in_array($traits['attack_type'], array('마법', '마법딜러'), true)) $summary['magic_units'] += $count;
+	}
+
+	if ($summary['melee_units'] >= 4) {
+		$summary['attack_multiplier'] += 0.5;
+		$summary['active_effects'][] = '근거리 영웅 4명 이상: 공격력 +50%';
+	}
+	if ($summary['magic_units'] >= 4) {
+		$summary['attack_multiplier'] += 0.5;
+		$summary['active_effects'][] = '마법 영웅 4명 이상: 공격력 +50%';
+	}
+
+	$summary['attack_bonus_percent'] = (int)round(($summary['attack_multiplier'] - 1.0) * 100);
+	return $summary;
+}
+
+function render_deck_synergy_html($summary) {
+	$melee = (int)(isset($summary['melee_units']) ? $summary['melee_units'] : 0);
+	$magic = (int)(isset($summary['magic_units']) ? $summary['magic_units'] : 0);
+	$bonus = (int)(isset($summary['attack_bonus_percent']) ? $summary['attack_bonus_percent'] : 0);
+	$total = (int)(isset($summary['total_units']) ? $summary['total_units'] : 0);
+
+	$melee_active = ($melee >= 4);
+	$magic_active = ($magic >= 4);
+	$melee_bg = $melee_active ? '#2e7d32' : '#333';
+	$magic_bg = $magic_active ? '#7b1fa2' : '#333';
+
+	$html = "<div title='출전 덱 시너지: 근거리 4명 이상 공격력 +50%, 마법 영웅 4명 이상 공격력 +50% (중첩 가능)' style='margin:8px 0 10px; padding:10px; background:#1b1b1b; border:1px solid #3b3b3b; border-radius:6px;'>";
+	$html .= "<div style='display:flex; justify-content:space-between; align-items:center; gap:8px;'>";
+	$html .= "<span style='font-size:0.85rem; color:#cfd8dc; font-weight:bold;'>⚙️ 출전 덱 시너지</span>";
+	$html .= "<span style='font-size:0.85rem; color:#ffd54f; font-weight:bold;'>공격력 +{$bonus}%</span>";
+	$html .= "</div>";
+	$html .= "<div style='font-size:0.75rem; color:#9e9e9e; margin-top:4px;'>출전 총원: {$total}명</div>";
+	$html .= "<div style='display:grid; gap:5px; margin-top:8px;'>";
+	$html .= "<div title='근거리 영웅 4명 이상이면 공격력 +50%' style='padding:6px 8px; border-radius:5px; background:{$melee_bg}; color:#fff; font-size:0.78rem;'>근거리 {$melee}/4" . ($melee_active ? " ✅" : "") . "</div>";
+	$html .= "<div title='마법 영웅 4명 이상이면 공격력 +50%' style='padding:6px 8px; border-radius:5px; background:{$magic_bg}; color:#fff; font-size:0.78rem;'>마법 {$magic}/4" . ($magic_active ? " ✅" : "") . "</div>";
+	$html .= "</div></div>";
+
+	return $html;
+}
+
 function estimate_expected_turn_damage(PDO $pdo, $uid, $cmd) {
 	$p_str = (int)$cmd['stat_str'];
 	$p_luk = (int)$cmd['stat_luk'];
@@ -354,7 +458,10 @@ function estimate_expected_turn_damage(PDO $pdo, $uid, $cmd) {
 		$heroes_expected += $avg * $hero_count * $men_mult * $expected_crit_mult;
 	}
 
-	$expected_turn_damage = ($commander_expected + $heroes_expected) * $agi_mult;
+	$deck_synergy = build_deck_synergy_summary($deck, true);
+	$attack_synergy_mult = (float)$deck_synergy['attack_multiplier'];
+
+	$expected_turn_damage = ($commander_expected + $heroes_expected) * $agi_mult * $attack_synergy_mult;
 	return max(10, (int)floor($expected_turn_damage));
 }
 
@@ -527,11 +634,15 @@ function build_hero_tooltip($hero) {
 	$level = max(1, (int)(isset($hero['level']) ? $hero['level'] : 1));
 	$quantity = max(1, (int)(isset($hero['quantity']) ? $hero['quantity'] : 1));
 	$battle_count = max(0, (int)(isset($hero['battle_count']) ? $hero['battle_count'] : 0));
+	$traits = get_hero_traits($name);
 
 	$lines = array(
 		"{$name} [{$rank}]",
 		"레벨: {$level}",
-		"보유 수량: {$quantity}"
+		"보유 수량: {$quantity}",
+		"공격 타입: {$traits['attack_type']}",
+		"사거리: {$traits['attack_range']}",
+		"종족: {$traits['race']}"
 	);
 
 	if ((int)(isset($hero['is_on_expedition']) ? $hero['is_on_expedition'] : 0) === 1) {
@@ -573,6 +684,7 @@ function generate_hero_lists($heroes) {
 	$deck_html = '';
 	$inv_html = '';
 	$deck_count = 0;
+	$deck_synergy_html = render_deck_synergy_html(build_deck_synergy_summary($heroes));
 
 	foreach ($heroes as $h) {
 		$color = isset($GLOBALS['colors'][$h['hero_rank']]) ? $GLOBALS['colors'][$h['hero_rank']] : '#fff';
@@ -602,7 +714,7 @@ function generate_hero_lists($heroes) {
 
 	if ($deck_count === 0) $deck_html = "<div style='color:#777; font-size:0.9rem; text-align:center; padding:10px;'>출전 중인 영웅이 없습니다.</div>";
 	if ($inv_html === '') $inv_html = "<div style='color:#777; font-size:0.9rem; text-align:center; padding:10px;'>보유 중인 대기 영웅이 없습니다.</div>";
-	return array($deck_html, $inv_html, $deck_count);
+	return array($deck_html, $inv_html, $deck_count, $deck_synergy_html);
 }
 
 function get_skill_effects_for_level($skill_def, $hero_level) {
@@ -1135,6 +1247,9 @@ function handle_combat(PDO $pdo) {
 		$deck_stmt = $pdo->prepare("SELECT hero_rank, hero_name, MAX(level) AS level, SUM(quantity) AS equipped_count FROM tb_heroes WHERE uid = ? AND is_equipped = 1 AND quantity > 0 GROUP BY hero_rank, hero_name");
 		$deck_stmt->execute(array($uid));
 		$deck = $deck_stmt->fetchAll();
+		$deck_synergy = build_deck_synergy_summary($deck, true);
+		$attack_synergy_mult = (float)$deck_synergy['attack_multiplier'];
+		$attack_synergy_bonus_pct = (int)$deck_synergy['attack_bonus_percent'];
 
 		$p_str = (int)$cmd['stat_str'];
 		$p_mag = (int)$cmd['stat_mag'];
@@ -1167,6 +1282,10 @@ function handle_combat(PDO $pdo) {
 		$player_base = max(1, (int)floor(($p_str * 1.8) + rand(4, 12)));
 		if ($relic_atk_bonus > 0) $player_base = (int)floor($player_base * (1 + ($relic_atk_bonus / 100)));
 		if ($berserk_bonus_pct > 0) $player_base = (int)floor($player_base * (1 + ($berserk_bonus_pct / 100)));
+		if ($attack_synergy_mult > 1.0) {
+			$player_base = (int)floor($player_base * $attack_synergy_mult);
+			$logs[] = "⚙️ <span style='color:#ffd54f; font-weight:bold;'>[덱 시너지]</span> 공격력 +{$attack_synergy_bonus_pct}% 적용";
+		}
 		$is_crit = (rand(1, 100) <= $crit_chance);
 		$player_dmg = $is_crit ? floor($player_base * $crit_mult) : $player_base;
 		$turn_damage_details[] = array('name' => '사령관', 'damage' => (int)$player_dmg);
@@ -1195,9 +1314,13 @@ function handle_combat(PDO $pdo) {
 					} elseif (in_array($hero['hero_name'], $magic_heroes, true) && $mag_party_bonus_pct > 0) {
 						$hero_dmg = (int)floor($hero_dmg * (1 + ($mag_party_bonus_pct / 100)));
 					}
+						if ($attack_synergy_mult > 1.0) {
+							$hero_dmg = (int)floor($hero_dmg * $attack_synergy_mult);
+						}
 
 					$armor_break_flat = isset($_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value']) ? (float)$_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value'] : 0;
 					if ($armor_break_flat > 0) $hero_dmg = (int)floor($hero_dmg * (1 + min(2.0, $armor_break_flat / 100.0)));
+						$hero_dmg = max(1, (int)$hero_dmg);
 
 					$is_h_crit = false;
 					if (rand(1, 100) <= floor($p_luk / 2)) { $is_h_crit = true; $hero_dmg = (int)floor($hero_dmg * $crit_mult); }
@@ -1594,11 +1717,27 @@ function handle_skill(PDO $pdo) {
 		$physical_heroes = array('늑대전사', '배트맨', '블롭', '베인', '닌자', '마스터 쿤', '골라조', '산적', '야만인', '레인저', '보안관', '호랑이사부');
 		$magic_heroes = array('냥법사', '콜디', '펄스생성기', '오크주술사', '중력자탄', '전기로봇', '충격로봇', '물의정령', '샌드맨', '마마', '아토', '와트', '타르');
 		$total_gold_gain = 0;
+		$deck = array();
+		$attack_synergy_mult = 1.0;
+		$attack_synergy_bonus_pct = 0;
+
+		if ($is_in_combat) {
+			$deck_stmt = $pdo->prepare("SELECT hero_rank, hero_name, MAX(level) AS level, SUM(quantity) AS equipped_count FROM tb_heroes WHERE uid = ? AND is_equipped = 1 AND quantity > 0 GROUP BY hero_rank, hero_name");
+			$deck_stmt->execute(array($uid));
+			$deck = $deck_stmt->fetchAll();
+			$deck_synergy = build_deck_synergy_summary($deck, true);
+			$attack_synergy_mult = (float)$deck_synergy['attack_multiplier'];
+			$attack_synergy_bonus_pct = (int)$deck_synergy['attack_bonus_percent'];
+			if ($attack_synergy_bonus_pct > 0) {
+				$logs[] = "⚙️ <span style='color:#ffd54f; font-weight:bold;'>[덱 시너지]</span> 공격력 +{$attack_synergy_bonus_pct}% 적용";
+			}
+		}
 
 		if ($skill['type'] === 'damage') {
 			if (!$is_in_combat) throw new Exception('해당 스킬은 전투 중에만 사용 가능합니다.');
 			$damage = (int)floor(((int)$skill['value'] + floor((int)$cmd['stat_mag'] * 1.5)) * $mag_amp);
 			if ($berserk_bonus_pct > 0) $damage = (int)floor($damage * (1 + ($berserk_bonus_pct / 100)));
+			if ($attack_synergy_mult > 1.0) $damage = (int)floor($damage * $attack_synergy_mult);
 			$new_mob_hp = max(0, $new_mob_hp - $damage);
 			$logs[] = "💥 몬스터에게 <span style='color:red;'>{$damage}</span> 피해.";
 		} elseif ($skill['type'] === 'heal') {
@@ -1621,10 +1760,6 @@ function handle_skill(PDO $pdo) {
 		}
 
 		if ($is_in_combat && $new_mob_hp > 0) {
-			$deck_stmt = $pdo->prepare("SELECT hero_rank, hero_name, MAX(level) AS level, SUM(quantity) AS equipped_count FROM tb_heroes WHERE uid = ? AND is_equipped = 1 AND quantity > 0 GROUP BY hero_rank, hero_name");
-			$deck_stmt->execute(array($uid));
-			$deck = $deck_stmt->fetchAll();
-
 			if (count($deck) > 0) {
 				$logs[] = "<div style='margin:5px 0; padding-left:10px; border-left:2px solid #555; color:#aaa; font-size:0.85rem;'>▼ 영웅들이 마법에 호응해 합세합니다!</div>";
 				foreach ($deck as $hero) {
@@ -1645,9 +1780,13 @@ function handle_skill(PDO $pdo) {
 						} elseif (in_array($hero['hero_name'], $magic_heroes, true) && $mag_party_bonus_pct > 0) {
 							$hero_dmg = (int)floor($hero_dmg * (1 + ($mag_party_bonus_pct / 100)));
 						}
+						if ($attack_synergy_mult > 1.0) {
+							$hero_dmg = (int)floor($hero_dmg * $attack_synergy_mult);
+						}
 
 						$armor_break_flat = isset($_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value']) ? (float)$_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value'] : 0;
 						if ($armor_break_flat > 0) $hero_dmg = (int)floor($hero_dmg * (1 + min(2.0, $armor_break_flat / 100.0)));
+						$hero_dmg = max(1, (int)$hero_dmg);
 
 						$is_h_crit = false;
 						if (rand(1, 100) <= floor($p_luk / 2)) { $is_h_crit = true; $hero_dmg = (int)floor($hero_dmg * $crit_mult); }
@@ -1836,7 +1975,7 @@ function handle_summon(PDO $pdo) {
 		$all = $pdo->prepare("SELECT * FROM tb_heroes WHERE uid = ? AND quantity > 0 ORDER BY is_equipped DESC, hero_rank DESC, hero_name ASC");
 		$all->execute(array($uid));
 		$heroes = $all->fetchAll();
-		list($deck_html, $inv_html, $deck_count) = generate_hero_lists($heroes);
+		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes);
 
 		$gold_st = $pdo->prepare("SELECT gold FROM tb_commanders WHERE uid = ?");
 		$gold_st->execute(array($uid));
@@ -1846,7 +1985,7 @@ function handle_summon(PDO $pdo) {
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $msg));
 		$pdo->commit();
 
-		echo json_encode(array('status'=>'success','msg'=>$msg,'new_rank'=>$rank,'new_hero_name'=>$hero_name,'deck_html'=>$deck_html,'inv_html'=>$inv_html,'deck_count'=>$deck_count,'new_gold'=>$new_gold));
+		echo json_encode(array('status'=>'success','msg'=>$msg,'new_rank'=>$rank,'new_hero_name'=>$hero_name,'deck_html'=>$deck_html,'inv_html'=>$inv_html,'deck_count'=>$deck_count,'deck_synergy_html'=>$deck_synergy_html,'new_gold'=>$new_gold));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
 		json_error($e->getMessage());
@@ -1894,7 +2033,7 @@ function handle_synthesize(PDO $pdo) {
 		$all = $pdo->prepare("SELECT * FROM tb_heroes WHERE uid = ? AND quantity > 0 ORDER BY is_equipped DESC, hero_rank DESC, hero_name ASC");
 		$all->execute(array($uid));
 		$heroes = $all->fetchAll();
-		list($deck_html, $inv_html, $deck_count) = generate_hero_lists($heroes);
+		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes);
 
 		$gold_st = $pdo->prepare("SELECT gold FROM tb_commanders WHERE uid = ?");
 		$gold_st->execute(array($uid));
@@ -1904,7 +2043,7 @@ function handle_synthesize(PDO $pdo) {
 		$trace_msg = "🧬 합성 완료: {$hero_name} x3 -> [{$next_rank}] {$new_hero_name} (대기 상태 지급)";
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $trace_msg));
 		$pdo->commit();
-		echo json_encode(array('status'=>'success','msg'=>$msg,'new_rank'=>$next_rank,'new_hero_name'=>$new_hero_name,'deck_html'=>$deck_html,'inv_html'=>$inv_html,'deck_count'=>$deck_count,'new_gold'=>$current_gold));
+		echo json_encode(array('status'=>'success','msg'=>$msg,'new_rank'=>$next_rank,'new_hero_name'=>$new_hero_name,'deck_html'=>$deck_html,'inv_html'=>$inv_html,'deck_count'=>$deck_count,'deck_synergy_html'=>$deck_synergy_html,'new_gold'=>$current_gold));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
 		json_error($e->getMessage());
@@ -2110,10 +2249,10 @@ function handle_equip(PDO $pdo) {
 		$all = $pdo->prepare("SELECT * FROM tb_heroes WHERE uid = ? AND quantity > 0 ORDER BY is_equipped DESC, hero_rank DESC, hero_name ASC");
 		$all->execute(array($uid));
 		$heroes = $all->fetchAll();
-		list($deck_html, $inv_html, $deck_count) = generate_hero_lists($heroes);
+		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes);
 
 		$pdo->commit();
-		echo json_encode(array('status' => 'success', 'deck_html' => $deck_html, 'inv_html' => $inv_html, 'deck_count' => $deck_count));
+		echo json_encode(array('status' => 'success', 'deck_html' => $deck_html, 'inv_html' => $inv_html, 'deck_count' => $deck_count, 'deck_synergy_html' => $deck_synergy_html));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
 		json_error($e->getMessage());
