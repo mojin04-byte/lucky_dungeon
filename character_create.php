@@ -22,15 +22,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // 정상적인 클래스가 넘어왔는지 해킹 방지 검증
     if (in_array($class_type, array('돌격', '신비', '전술'), true)) {
-        
-        // [TRPG 다이스 굴림 핵심 로직] 기본 1~20 주사위
-        $str = rand(1, 20); // 힘
-        $mag = rand(1, 20); // 마력
-        $agi = rand(1, 20); // 민첩
-        $luk = rand(1, 20); // 행운
-        $men = rand(1, 20); // 정신력
-        $vit = rand(1, 20); // 체력
-        $disp = rand(1, 100); // 성향 (1:극도로 조심 ~ 100:매우 과감)
+        // 클라이언트 랜덤 결과(재굴림 포함) 검증
+        $roll_keys = array('str', 'mag', 'agi', 'luk', 'men', 'vit');
+        $base_rolls = array();
+        $roll_is_valid = true;
+        foreach ($roll_keys as $rk) {
+            $posted = isset($_POST['roll_' . $rk]) ? (int)$_POST['roll_' . $rk] : 0;
+            if ($posted < 1 || $posted > 20) {
+                $roll_is_valid = false;
+                break;
+            }
+            $base_rolls[$rk] = $posted;
+        }
+        $disp = isset($_POST['roll_disposition']) ? (int)$_POST['roll_disposition'] : 0;
+        if ($disp < 1 || $disp > 100) {
+            $roll_is_valid = false;
+        }
+
+        if (!$roll_is_valid) {
+            $base_rolls = array(
+                'str' => rand(1, 20),
+                'mag' => rand(1, 20),
+                'agi' => rand(1, 20),
+                'luk' => rand(1, 20),
+                'men' => rand(1, 20),
+                'vit' => rand(1, 20),
+            );
+            $disp = rand(1, 100);
+        }
+
+        $str = (int)$base_rolls['str'];
+        $mag = (int)$base_rolls['mag'];
+        $agi = (int)$base_rolls['agi'];
+        $luk = (int)$base_rolls['luk'];
+        $men = (int)$base_rolls['men'];
+        $vit = (int)$base_rolls['vit'];
 
         // 클래스별 특화 보너스 스탯 부여 (+10 고정 보너스)
         if ($class_type === '돌격') {
@@ -101,6 +127,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         button { width: 100%; padding: 15px; background-color: #ffa500; color: #121212; border: none; border-radius: 4px; font-weight: bold; font-size: 16px; cursor: pointer; margin-top: 10px; }
         button:hover { background-color: #e69500; }
         .error { color: #ff5252; text-align: center; margin-bottom: 15px; }
+        .roll-panel { margin: 14px 0 18px; padding: 12px; background: #242424; border: 1px solid #3d3d3d; border-radius: 6px; }
+        .roll-title { color: #ffcc80; font-weight: bold; margin-bottom: 8px; font-size: 14px; }
+        .roll-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .roll-row { display: flex; align-items: center; justify-content: space-between; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; padding: 6px 8px; }
+        .roll-name { color: #bdbdbd; font-size: 13px; }
+        .roll-value { color: #fff; font-weight: bold; min-width: 38px; text-align: center; }
+        .btn-reroll { width: auto; margin: 0; padding: 5px 8px; font-size: 12px; background: #546e7a; color: #fff; border-radius: 4px; }
+        .btn-reroll:hover { background: #607d8b; }
+        .roll-note { color: #9e9e9e; font-size: 12px; margin-top: 8px; line-height: 1.4; }
     </style>
 </head>
 <body>
@@ -138,6 +173,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </label>
 
+        <div class="roll-panel">
+            <div class="roll-title">🎲 초기 능력치 랜덤 배분 (원하는 만큼 재굴림 가능)</div>
+            <div class="roll-grid">
+                <div class="roll-row"><span class="roll-name">힘 (STR)</span><span class="roll-value" id="roll-view-str">-</span><button type="button" class="btn-reroll" data-roll-key="str">다시</button></div>
+                <div class="roll-row"><span class="roll-name">마력 (MAG)</span><span class="roll-value" id="roll-view-mag">-</span><button type="button" class="btn-reroll" data-roll-key="mag">다시</button></div>
+                <div class="roll-row"><span class="roll-name">민첩 (AGI)</span><span class="roll-value" id="roll-view-agi">-</span><button type="button" class="btn-reroll" data-roll-key="agi">다시</button></div>
+                <div class="roll-row"><span class="roll-name">행운 (LUK)</span><span class="roll-value" id="roll-view-luk">-</span><button type="button" class="btn-reroll" data-roll-key="luk">다시</button></div>
+                <div class="roll-row"><span class="roll-name">정신력 (MEN)</span><span class="roll-value" id="roll-view-men">-</span><button type="button" class="btn-reroll" data-roll-key="men">다시</button></div>
+                <div class="roll-row"><span class="roll-name">체력 (VIT)</span><span class="roll-value" id="roll-view-vit">-</span><button type="button" class="btn-reroll" data-roll-key="vit">다시</button></div>
+                <div class="roll-row" style="grid-column: 1 / span 2;"><span class="roll-name">성향 (1~100)</span><span class="roll-value" id="roll-view-disposition">-</span><button type="button" class="btn-reroll" data-roll-key="disposition">다시</button></div>
+            </div>
+            <div class="roll-note">선택한 클래스의 +10 보너스는 최종 생성 시 적용됩니다. 만족할 때까지 개별 재굴림 후 입장하세요.</div>
+        </div>
+
+        <input type="hidden" name="roll_str" id="roll-input-str" value="">
+        <input type="hidden" name="roll_mag" id="roll-input-mag" value="">
+        <input type="hidden" name="roll_agi" id="roll-input-agi" value="">
+        <input type="hidden" name="roll_luk" id="roll-input-luk" value="">
+        <input type="hidden" name="roll_men" id="roll-input-men" value="">
+        <input type="hidden" name="roll_vit" id="roll-input-vit" value="">
+        <input type="hidden" name="roll_disposition" id="roll-input-disposition" value="">
+
 		<div style="margin-bottom: 15px;">
 			<label for="background_story" style="display:block; margin-bottom:5px; color: #ccc;">캐릭터 탄생 설화 (AI 생성 등)</label>
 			<textarea id="background_story" name="background_story" rows="4" placeholder="캐릭터의 배경 이야기를 자유롭게 작성하거나 붙여넣어 주세요."></textarea>
@@ -146,6 +203,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <button type="submit">주사위 굴리기 및 던전 입장 🎲</button>
     </form>
 </div>
+
+<script>
+(function () {
+    const rolls = {
+        str: 1,
+        mag: 1,
+        agi: 1,
+        luk: 1,
+        men: 1,
+        vit: 1,
+        disposition: 50,
+    };
+
+    function randomInt(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function rerollKey(key) {
+        if (key === 'disposition') {
+            rolls.disposition = randomInt(1, 100);
+            return;
+        }
+        rolls[key] = randomInt(1, 20);
+    }
+
+    function syncRollToDom(key) {
+        const view = document.getElementById('roll-view-' + key);
+        if (view) view.textContent = String(rolls[key]);
+        const input = document.getElementById('roll-input-' + key);
+        if (input) input.value = String(rolls[key]);
+    }
+
+    function syncAll() {
+        Object.keys(rolls).forEach(syncRollToDom);
+    }
+
+    ['str', 'mag', 'agi', 'luk', 'men', 'vit', 'disposition'].forEach((key) => {
+        rerollKey(key);
+    });
+    syncAll();
+
+    const rerollButtons = document.querySelectorAll('.btn-reroll[data-roll-key]');
+    rerollButtons.forEach((btn) => {
+        btn.addEventListener('click', function () {
+            const key = btn.getAttribute('data-roll-key');
+            if (!key || !(key in rolls)) return;
+            rerollKey(key);
+            syncRollToDom(key);
+        });
+    });
+})();
+</script>
 
 </body>
 </html>

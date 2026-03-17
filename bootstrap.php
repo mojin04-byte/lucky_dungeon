@@ -196,6 +196,21 @@ try {
     if (!column_exists($pdo, 'tb_commanders', 'intro_story_seen')) {
         $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `intro_story_seen` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '시작 서사 연출 확인 여부'");
     }
+    if (!column_exists($pdo, 'tb_commanders', 'reincarnation_count')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `reincarnation_count` INT NOT NULL DEFAULT 0 COMMENT '환생 횟수'");
+    }
+    if (!column_exists($pdo, 'tb_commanders', 'lifetime_gold_earned')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `lifetime_gold_earned` BIGINT NOT NULL DEFAULT 0 COMMENT '누적 획득 골드'");
+    }
+    if (!column_exists($pdo, 'tb_commanders', 'reincarnation_level_total')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `reincarnation_level_total` INT NOT NULL DEFAULT 0 COMMENT '환생 누적 레벨 합계'");
+    }
+    if (!column_exists($pdo, 'tb_commanders', 'reincarnation_stat_bonus')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `reincarnation_stat_bonus` INT NOT NULL DEFAULT 0 COMMENT '환생 누적 스탯 보너스'");
+    }
+    if (column_exists($pdo, 'tb_commanders', 'lifetime_gold_earned')) {
+        $pdo->exec("UPDATE `tb_commanders` SET `lifetime_gold_earned` = GREATEST(`lifetime_gold_earned`, `gold`) WHERE `lifetime_gold_earned` = 0 AND `gold` > 0");
+    }
 
     // 토벌대 메인 테이블
     if (!table_exists($pdo, 'tb_expeditions')) {

@@ -8,8 +8,10 @@ let isProcessingTurn = false;
 let isProcessingAction = false;
 const MONSTER_HP_STEP_DELAY = 150;
 const AUTO_ACTION_DELAY = 450;
-const AUTO_REST_HP_THRESHOLD = 0.45;
-const AUTO_REST_MP_THRESHOLD = 0.35;
+const DEFAULT_AUTO_REST_MP_THRESHOLD = 0.35;
+const CAUTIOUS_AUTO_REST_MP_THRESHOLD = 0.45;
+const BOLD_AUTO_REST_MP_THRESHOLD = 0.00;
+const AUTO_SKILL_BUFF_DURATION = 3;
 const COLLAPSE_STORAGE_PREFIX = 'ld_panel_collapsed_';
 
 const BATTLE_STAGE = {
@@ -59,7 +61,23 @@ function updateInventoryUI(data) {
     if (data.inv_html !== undefined) document.getElementById('hero-list').innerHTML = data.inv_html;
     if (data.deck_count !== undefined) document.getElementById('deck-count-display').innerText = data.deck_count;
     if (data.new_gold !== undefined) document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+    if (data.hero_owned !== undefined || data.hero_limit !== undefined) {
+        updateHeroCapacityDisplay(data.hero_owned, data.hero_limit);
+    }
     applyButtonTooltips();
+}
+
+function updateHeroCapacityDisplay(heroOwned, heroLimit) {
+    const ownedEl = document.getElementById('hero-owned-display');
+    const limitEl = document.getElementById('hero-limit-display');
+    if (!ownedEl || !limitEl) return;
+
+    if (heroOwned !== undefined && heroOwned !== null) {
+        ownedEl.innerText = String(Number(heroOwned) || 0);
+    }
+    if (heroLimit !== undefined && heroLimit !== null) {
+        limitEl.innerText = String(Number(heroLimit) || 0);
+    }
 }
 
 function applyButtonTooltips(root = document) {
@@ -477,6 +495,43 @@ function applyRewardUi(data) {
     }
 }
 
+function getDispositionLabel(value) {
+    const disp = clampDispositionValue(value);
+    if (disp <= 20) return '극도로 조심';
+    if (disp <= 40) return '신중함';
+    if (disp <= 60) return '균형잡힘';
+    if (disp <= 80) return '다소 과감';
+    return '매우 과감';
+}
+
+function updateCommanderStatsDisplay(stats = {}) {
+    const map = {
+        str: 'val-str',
+        mag: 'val-mag',
+        agi: 'val-agi',
+        luk: 'val-luk',
+        men: 'val-men',
+        vit: 'val-vit',
+    };
+
+    Object.entries(map).forEach(([key, elementId]) => {
+        if (stats[key] === undefined) return;
+        const el = document.getElementById(elementId);
+        if (el) el.innerText = String(stats[key]);
+    });
+
+    if (stats.disposition !== undefined) {
+        window.commanderDisposition = clampDispositionValue(stats.disposition);
+        const dispEl = document.getElementById('val-disposition');
+        if (dispEl) {
+            dispEl.innerText = `${window.commanderDisposition} (${getDispositionLabel(window.commanderDisposition)})`;
+        }
+        updateAutoRestModeUI();
+    }
+
+    refreshCommanderStatHighlights();
+}
+
 function addLog(message, isSystem = false) {
     const logBox = document.getElementById('game-log');
     const newLog = document.createElement('div');
@@ -553,6 +608,113 @@ function getCurrentPlayerMp() {
     return match ? Number(match[1]) : 0;
 }
 
+function clampDispositionValue(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 50;
+    return Math.max(0, Math.min(100, Math.floor(numeric)));
+}
+
+function getCommanderDisposition() {
+    return clampDispositionValue(window.commanderDisposition !== undefined ? window.commanderDisposition : 50);
+}
+
+function isBoldDisposition() {
+    return getCommanderDisposition() >= 80;
+}
+
+function isCautiousDisposition() {
+    return getCommanderDisposition() <= 20;
+}
+
+function getAutoRestHpThresholdRatio() {
+    const disposition = getCommanderDisposition();
+    return Math.max(0.20, Math.min(0.70, (70 - (disposition * 0.5)) / 100));
+}
+
+function getAutoRestMpThresholdRatio() {
+    if (isBoldDisposition()) return BOLD_AUTO_REST_MP_THRESHOLD;
+    if (isCautiousDisposition()) return CAUTIOUS_AUTO_REST_MP_THRESHOLD;
+    return DEFAULT_AUTO_REST_MP_THRESHOLD;
+}
+
+function ensureAutoCombatState() {
+    if (!window.autoCombatState || typeof window.autoCombatState !== 'object') {
+        window.autoCombatState = { shieldUpTurns: 0, berserkTurns: 0 };
+    }
+    return window.autoCombatState;
+}
+
+function resetAutoCombatState() {
+    window.autoCombatState = { shieldUpTurns: 0, berserkTurns: 0 };
+}
+
+function advanceAutoCombatState(skillId = '') {
+    const state = ensureAutoCombatState();
+    state.shieldUpTurns = (skillId === 'shield_up')
+        ? AUTO_SKILL_BUFF_DURATION
+        : Math.max(0, Number(state.shieldUpTurns || 0) - 1);
+    state.berserkTurns = (skillId === 'berserk')
+        ? AUTO_SKILL_BUFF_DURATION
+        : Math.max(0, Number(state.berserkTurns || 0) - 1);
+    return state;
+}
+
+function chooseAutoCombatAction() {
+    const hp = getCurrentPlayerHp();
+    const maxHp = Math.max(1, Number(window.playerMaxHp || 1));
+    const mp = getCurrentPlayerMp();
+    const hpRatio = hp / maxHp;
+    const state = ensureAutoCombatState();
+    const shieldActive = Number(state.shieldUpTurns || 0) > 0;
+    const berserkActive = Number(state.berserkTurns || 0) > 0;
+
+    const canHeal = mp >= 30 && hp < maxHp;
+    const canThunder = mp >= 28;
+    const canFireball = mp >= 25;
+    const canShield = !shieldActive;
+    const canBerserk = !berserkActive && hpRatio >= 0.55 && hp > Math.max(15, Math.floor(maxHp * 0.18));
+
+    if (isBoldDisposition()) {
+        if (canBerserk) return 'berserk';
+        if (canThunder) return 'thunder_bolt';
+        if (canFireball) return 'fireball';
+        if (hpRatio <= 0.18 && canHeal) return 'heal';
+        if (hpRatio <= 0.28 && canShield) return 'shield_up';
+        return 'attack';
+    }
+
+    if (isCautiousDisposition()) {
+        if (hpRatio <= 0.92 && canHeal) return 'heal';
+        if (hpRatio <= 0.98 && canShield) return 'shield_up';
+        if (canThunder && hpRatio >= 0.95) return 'thunder_bolt';
+        if (canFireball && hpRatio >= 0.90) return 'fireball';
+        return 'attack';
+    }
+
+    if (hpRatio <= 0.35 && canHeal) return 'heal';
+    if (hpRatio <= 0.55 && canShield) return 'shield_up';
+    if (canBerserk) return 'berserk';
+    if (canThunder && hpRatio >= 0.45) return 'thunder_bolt';
+    if (canFireball && hpRatio >= 0.35) return 'fireball';
+    return 'attack';
+}
+
+function scheduleAutoCombatAction(delay = 420) {
+    clearCombatTimer();
+    if (!isAutoMode || !window.isCombat || isProcessingTurn || window.battleStage !== BATTLE_STAGE.COMBAT) return;
+    combatTimer = setTimeout(runAutoCombatAction, Math.max(0, delay));
+}
+
+async function runAutoCombatAction() {
+    if (!isAutoMode || !window.isCombat || isProcessingTurn || window.battleStage !== BATTLE_STAGE.COMBAT) return;
+    const nextAction = chooseAutoCombatAction();
+    if (nextAction === 'attack') {
+        await doCombatTurn();
+        return;
+    }
+    await useSkill(nextAction);
+}
+
 function triggerIncomingDamageEffect() {
     const centerPanel = document.querySelector('.center-panel');
     const hpBar = document.getElementById('player-hp-bar');
@@ -586,7 +748,8 @@ function updateAutoExploreModeUI() {
 function updateAutoRestModeUI() {
     const statusEl = document.getElementById('auto-rest-status-text');
     if (!statusEl) return;
-    statusEl.innerText = isAutoRestMode ? '[ON]' : '[OFF]';
+    const thresholdPercent = Math.round(getAutoRestHpThresholdRatio() * 100);
+    statusEl.innerText = isAutoRestMode ? `[ON ${thresholdPercent}%]` : '[OFF]';
     statusEl.style.color = isAutoRestMode ? '#ffb74d' : '#aaa';
 }
 
@@ -601,7 +764,9 @@ function shouldAutoRest() {
     if (!isAutoRestMode) return false;
     const hpRatio = getCurrentPlayerHp() / Math.max(1, Number(window.playerMaxHp || 1));
     const mpRatio = getCurrentPlayerMp() / Math.max(1, Number(window.playerMaxMp || 1));
-    return hpRatio <= AUTO_REST_HP_THRESHOLD || mpRatio <= AUTO_REST_MP_THRESHOLD;
+    const hpThreshold = getAutoRestHpThresholdRatio();
+    const mpThreshold = getAutoRestMpThresholdRatio();
+    return hpRatio <= hpThreshold || (mpThreshold > 0 && mpRatio <= mpThreshold);
 }
 
 function scheduleAutoAction(delay = AUTO_ACTION_DELAY) {
@@ -904,6 +1069,7 @@ function enterDeadState() {
     window.isCombat = false;
     clearCombatTimer();
     clearAutoActionTimer();
+    resetAutoCombatState();
     setBattleStage(BATTLE_STAGE.DEAD);
     addLog('<h2 style="color:red;">☠️ 사망하였습니다.</h2>모든 행동이 불가능합니다. 여신의 축복을 받으세요.', true);
 }
@@ -911,6 +1077,7 @@ function enterDeadState() {
 function exitToExploreState() {
     window.isCombat = false;
     clearCombatTimer();
+    resetAutoCombatState();
     document.body.classList.remove('boss-bg');
     setBattleStage(BATTLE_STAGE.EXPLORE);
     scheduleAutoAction(AUTO_ACTION_DELAY);
@@ -930,13 +1097,14 @@ function enterEncounterState(mobName, mobMaxHp) {
 function enterCombatState(mobName, mobMaxHp) {
     window.isCombat = true;
     clearAutoActionTimer();
+    resetAutoCombatState();
     if (!window.currentMobHp || window.currentMobHp <= 0) window.currentMobHp = mobMaxHp;
     setBattleStage(BATTLE_STAGE.COMBAT, mobName, mobMaxHp);
     if (isAutoMode && isBossAutoCombatRestricted(mobName)) {
         disableAutoCombatMode();
         return;
     }
-    if (isAutoMode) doCombatTurn();
+    if (isAutoMode) runAutoCombatAction();
 }
 
 function clearCombatTimer() {
@@ -971,7 +1139,7 @@ function toggleAutoMode() {
     }
 
     updateAutoCombatModeUI();
-    if (isAutoMode && window.isCombat && !isProcessingTurn) doCombatTurn();
+    if (isAutoMode && window.isCombat && !isProcessingTurn) runAutoCombatAction();
 }
 
 // ==================================
@@ -1008,6 +1176,7 @@ async function upStat(type, amount = 1) {
 async function doCombatTurn() {
     if (isProcessingTurn || !window.isCombat || window.battleStage !== BATTLE_STAGE.COMBAT) return;
     isProcessingTurn = true;
+    let continueAutoCombat = false;
     const data = await callApi('combat');
     if (data) {
         if (data.status === 'error') {
@@ -1090,10 +1259,11 @@ async function doCombatTurn() {
                         if (!sseDone) await wait(7);
                     }
 
+                    advanceAutoCombatState('attack');
                     isProcessingTurn = false;
                     if (data.status === 'victory') { exitToExploreState(); toggleEquip(0, -1); }
                     else if (data.status === 'defeat') { enterDeadState(); }
-                    else if (isAutoMode) { combatTimer = setTimeout(doCombatTurn, 500); }
+                    else if (isAutoMode) { scheduleAutoCombatAction(500); }
                     return; // 완료
                 } else {
                     await addTurnDamageBreakdown(data, {
@@ -1111,19 +1281,25 @@ async function doCombatTurn() {
                     if (Array.isArray(data.logs)) {
                         for (const log of data.logs) addLog(log);
                     }
+                    advanceAutoCombatState('attack');
                     if (data.status === 'victory') { exitToExploreState(); toggleEquip(0, -1); } 
                     else if (data.status === 'defeat') { enterDeadState(); } 
-                    else if (isAutoMode) { combatTimer = setTimeout(doCombatTurn, 500); }
+                    else if (isAutoMode) { continueAutoCombat = true; }
                 }
         }
     }
         if (!data || !data.stream) isProcessingTurn = false;
+        if (continueAutoCombat) scheduleAutoCombatAction(500);
 }
 
 async function attemptFlee() {
     const data = await callApi('flee');
     if (data) {
         addLog(data.log);
+        if (data.new_gold !== undefined) {
+            const goldEl = document.getElementById('gold-display');
+            if (goldEl) goldEl.innerText = Number(data.new_gold).toLocaleString();
+        }
         if (data.status === 'success') {
             if (data.new_floor !== undefined) {
                 updateFloorDisplay(data.new_floor, data.new_max_floor);
@@ -1314,12 +1490,16 @@ async function revive() {
 async function useSkill(skillId) {
     if (isProcessingTurn) { addLog('⏳ 턴을 기다리는 중입니다.'); return; }
     const wasCombat = Boolean(window.isCombat && window.battleStage === BATTLE_STAGE.COMBAT);
+    let continueAutoCombat = false;
     isProcessingTurn = true;
     const formData = new URLSearchParams();
     formData.append('skill_id', skillId);
     const data = await callApi('skill', { method: 'POST', body: formData });
     if(data) {
-        if (data.status === 'error') { addLog('❌ ' + data.msg, true); }
+        if (data.status === 'error') {
+            addLog('❌ ' + data.msg, true);
+            if (wasCombat && isAutoMode) continueAutoCombat = true;
+        }
         else {
             if (Array.isArray(data.logs)) {
                 for (const log of data.logs) {
@@ -1328,15 +1508,17 @@ async function useSkill(skillId) {
             }
             updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
             applyRewardUi(data);
+            if (wasCombat) advanceAutoCombatState(skillId);
             if (wasCombat && data.mob_hp !== undefined && data.mob_hp !== null) {
                 updateMonsterBars(Number(data.mob_hp || 0), window.currentMobMaxHp || 1);
             }
             if (wasCombat && Number(data.mob_hp || 0) <= 0) {
                 addLog('💫 승리했습니다!'); await wait(1000); exitToExploreState(); toggleEquip(0, -1);
-            } else if (wasCombat && isAutoMode) { doCombatTurn(); }
+            } else if (wasCombat && isAutoMode) { continueAutoCombat = true; }
         }
     }
     isProcessingTurn = false;
+    if (continueAutoCombat) scheduleAutoCombatAction(320);
 }
 
 async function toggleEquip(invId, action) {
@@ -1433,6 +1615,79 @@ const openCombineModal = () => {
     combineHero('view', '');
 };
 
+async function openReincarnationModal() {
+    const modal = document.getElementById('reincarnation-modal');
+    const area = document.getElementById('reincarnation-content-area');
+    if (!modal || !area) return;
+
+    modal.style.display = 'flex';
+    area.innerHTML = '<span style="color:#aaa;">불러오는 중...</span>';
+
+    const data = await callApi('reincarnate_preview');
+    if (!data || data.status !== 'success') {
+        area.innerHTML = '<span style="color:#f44336;">환생 정보를 불러오지 못했습니다.</span>';
+        return;
+    }
+
+    area.innerHTML = `
+        <div style="margin-bottom:12px; color:#d1c4e9;">현재 레벨 <b>Lv.${Number(data.level).toLocaleString()}</b>, 환생 <b>${Number(data.reincarnation_count).toLocaleString()}회</b></div>
+        <div style="background:#1d1d1d; border:1px solid #3d2f5e; border-radius:8px; padding:12px; margin-bottom:10px;">
+            <div style="color:#ffcc80; font-weight:bold; margin-bottom:6px;">환생 후 즉시 적용</div>
+            <div>시작 골드: <b>${Number(data.projected_start_gold).toLocaleString()}G</b> (누적 골드 보너스 ${Number(data.gold_bonus).toLocaleString()}G)</div>
+            <div>이번 생 누적 레벨 반영: <b>${Number(data.life_levels).toLocaleString()}</b></div>
+            <div>이번 환생 추가 스탯 보너스: <b>+${Number(data.new_stat_bonus_gain).toLocaleString()}</b></div>
+            <div>환생 누적 랜덤 보너스 총합: <b>+${Number(data.projected_stat_bonus_total).toLocaleString()}</b></div>
+        </div>
+        <div style="background:#161616; border:1px solid #333; border-radius:8px; padding:12px; color:#bdbdbd; font-size:0.92rem; margin-bottom:12px;">
+            영웅, 유물, 내실 강화는 유지됩니다. 사령관 레벨/경험치/스탯/층수/현재 전투 상태만 초기화되며, 새 육신은 클래스 기반 기본 스탯 후 랜덤 재분배로 시작합니다.
+        </div>
+        <button onclick="confirmReincarnation()" style="width:100%; padding:12px; border:none; border-radius:6px; background:#7b1fa2; color:#fff; font-weight:bold; cursor:pointer;">환생 시작</button>
+    `;
+}
+
+async function confirmReincarnation() {
+    const first = window.confirm('환생을 진행하면 현재 사령관 레벨/경험치/층수/전투 상태가 초기화됩니다. 계속합니까?');
+    if (!first) return;
+    const second = window.confirm('정말 환생하시겠습니까? 환생 후 스탯은 클래스 기반으로 다시 랜덤 분배됩니다.');
+    if (!second) return;
+
+    const data = await callApi('reincarnate', { method: 'POST', body: new URLSearchParams() });
+    if (!data || data.status !== 'success') {
+        if (data && data.msg) addLog(data.msg, true);
+        return;
+    }
+
+    const modal = document.getElementById('reincarnation-modal');
+    if (modal) modal.style.display = 'none';
+
+    window.reincarnationCount = Number(data.reincarnation_count || 0);
+    window.reincarnationStatBonus = Number(data.reincarnation_stat_bonus || 0);
+    window.reincarnationLevelTotal = Number(data.reincarnation_level_total || 0);
+    window.currentMobName = '';
+    window.currentMobHp = 0;
+    window.currentMobMaxHp = 0;
+    window.isDead = false;
+    window.isCombat = false;
+
+    updateFloorDisplay(data.new_floor, data.new_floor);
+    updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
+    updateExpBar(data.new_level, data.new_exp, data.exp_to_next);
+    updateStatUI(data.stat_points);
+    if (data.new_gold !== undefined) {
+        const goldEl = document.getElementById('gold-display');
+        if (goldEl) goldEl.innerText = Number(data.new_gold).toLocaleString();
+    }
+    if (data.stats) {
+        updateCommanderStatsDisplay({ ...data.stats, disposition: data.new_disposition });
+    } else if (data.new_disposition !== undefined) {
+        updateCommanderStatsDisplay({ disposition: data.new_disposition });
+    }
+
+    addLog(data.log, true);
+    addLog('🎲 환생 후 스탯은 클래스 보정 뒤 랜덤 재분배되었습니다.', true);
+    exitToExploreState();
+}
+
 // ==================================
 // 내실 강화 / 제단 축복 UI
 // ==================================
@@ -1448,6 +1703,8 @@ async function openProgressionModal() {
         area.innerHTML = '<span style="color:#f44336;">불러오기 실패</span>';
         return;
     }
+
+    updateHeroCapacityDisplay(data.hero_owned, data.hero_limit);
 
     let html = `<div style="margin-bottom:14px; color:#ffcc80; font-size:0.95rem;">💰 보유 골드: <b>${Number(data.gold).toLocaleString()}G</b> &nbsp;|&nbsp; 🧑‍🤝‍🧑 영웅 보유: <b>${data.hero_owned}/${data.hero_limit}</b>명</div>`;
 
@@ -1680,6 +1937,8 @@ window.addEventListener('DOMContentLoaded', () => {
     window.playerMaxMp = window.playerMaxMp || 0;
     window.playerCurrentHp = window.playerCurrentHp || 0;
     window.playerCurrentMp = window.playerCurrentMp || 0;
+    window.commanderDisposition = clampDispositionValue(window.commanderDisposition !== undefined ? window.commanderDisposition : 50);
+    resetAutoCombatState();
 
     // 전투 모드 기본값: 수동
     const autoToggle = document.getElementById('auto-combat-toggle');

@@ -33,7 +33,7 @@ if ($intro_story_seen === 0) {
         "다음 배경 설정을 바탕으로, 게임 시작 직후 메인 팝업에서 보여줄 오프닝 서사를 작성하라. " .
         "반드시 한국어로 작성하고, 100자 이상(권장 180~320자), 6~10문장의 장대한 다크 판타지 연출로 구성하라. " .
         "주인공 이름은 '{$commander['nickname']}', 직업은 '{$commander['class_type']}', 톤은 '{$tone_label}'이다. " .
-        "반드시 '세렌디피티 길드'를 직접 언급하고, 사령관 아이디 '{$commander['nickname']}'와 식별 번호 'UID {$uid}'를 자연스럽게 포함하라. " .
+        "반드시 '세렌디피티 길드'를 직접 언급하고, 사령관 아이디 '{$commander['nickname']}'를 자연스럽게 포함하라. " .
         "플레이어가 곧 1층 탐험을 시작한다는 긴장감을 담고, 마지막 문장은 심연으로 첫 발을 내딛는 장면으로 마무리하라. " .
         "배경 서사: {$story_seed}"
     );
@@ -86,6 +86,24 @@ if ($commander_stat_max > $commander_stat_min) {
         if ($value === $commander_stat_max) $commander_stat_classes[$key] .= ' stat-highest';
         if ($value === $commander_stat_min) $commander_stat_classes[$key] .= ' stat-lowest';
     }
+}
+
+$hero_owned_count = 0;
+$hero_limit_count = 30;
+try {
+    $owned_stmt = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM tb_heroes WHERE uid = ? AND quantity > 0");
+    $owned_stmt->execute([$uid]);
+    $hero_owned_count = (int)$owned_stmt->fetchColumn();
+} catch (\Throwable $e) {
+    $hero_owned_count = 0;
+}
+try {
+    $cap_stmt = $pdo->prepare("SELECT hero_capacity_tier FROM tb_commander_progression WHERE uid = ? LIMIT 1");
+    $cap_stmt->execute([$uid]);
+    $tier = (int)$cap_stmt->fetchColumn();
+    $hero_limit_count = 30 + max(0, $tier) * 5;
+} catch (\Throwable $e) {
+    $hero_limit_count = 30;
 }
 ?>
 
@@ -229,7 +247,7 @@ if ($commander_stat_max > $commander_stat_min) {
             <div class="stat-box" title="LUK: 치명타 확률 floor(LUK/2)%, 치명 배율 1.5+LUK*0.01, 탐험 골드/행운 이벤트 강화, 소환(전설/영웅/희귀) 가중치 보정"><span class="stat-name">행운 (LUK)</span> <div><span class="<?= $commander_stat_classes['luk'] ?>" data-commander-stat="luk" id="val-luk"><?= $commander['stat_luk'] ?></span> <button class="btn-stat-up" data-stat="luk" title="LUK 1 증가">+</button></div></div>
             <div class="stat-box" title="MEN: 최대 MP +5/포인트, 휴식 추가 회복 +MEN*3, 영웅 피해 배율 1+MEN*0.005, 영웅 스킬 발동 +2%/10 MEN"><span class="stat-name">정신력 (MEN)</span> <div><span class="<?= $commander_stat_classes['men'] ?>" data-commander-stat="men" id="val-men"><?= $commander['stat_men'] ?></span> <button class="btn-stat-up" data-stat="men" title="MEN 1 증가">+</button></div></div>
             <div class="stat-box" title="VIT: 최대 HP +20/포인트, 피해 감소 floor(VIT/2), 반격 방어 floor(VIT/5)%, 영웅 보호막 floor(VIT/10)% (최대 40%)"><span class="stat-name">체력 (VIT)</span> <div><span class="<?= $commander_stat_classes['vit'] ?>" data-commander-stat="vit" id="val-vit"><?= $commander['stat_vit'] ?></span> <button class="btn-stat-up" data-stat="vit" title="VIT 1 증가">+</button></div></div>
-            <div class="stat-box"><span class="stat-name">성향</span> <span class="stat-value"><?= $commander['disposition'] ?> (<?php 
+            <div class="stat-box" title="성향: 자동 휴식 HP 기준 = 70% - 성향*0.5%. 상자 리스크/보상이 크게 달라지고, 도주 확률/패널티와 첫 턴 선공 판정, 전투 치명/회피 성향 보정에도 숨겨진 영향이 있습니다."><span class="stat-name">성향</span> <span class="stat-value" id="val-disposition"><?= $commander['disposition'] ?> (<?php 
                 $disp = $commander['disposition'];
                 if ($disp <= 20) echo '극도로 조심'; 
                 elseif ($disp <= 40) echo '신중함'; 
@@ -242,7 +260,8 @@ if ($commander_stat_max > $commander_stat_min) {
                 <div class="btn" onclick="openRelicModal()" style="padding: 10px; font-size: 0.9rem; background:#6d4c41;">유물 제련 🗿</div>
                 <div class="btn" onclick="openItemModal()" style="padding: 10px; font-size: 0.9rem; background:#546e7a;">아이템 가방 🎒</div>
                 <div class="btn" onclick="openProgressionModal()" style="padding: 10px; font-size: 0.9rem; background:#4a148c;">내실 강화 🏯</div>
-                <div class="btn" onclick="document.getElementById('stat-help-modal').style.display='flex'" style="padding: 10px; font-size: 0.9rem; background:#455a64; grid-column: span 2;">스탯 공식 도움말 📘</div>
+                <div class="btn" onclick="document.getElementById('stat-help-modal').style.display='flex'" style="padding: 10px; font-size: 0.9rem; background:#455a64;">스탯 공식 도움말 📘</div>
+                <div class="btn" onclick="openReincarnationModal()" style="padding: 10px; font-size: 0.9rem; background:#6a1b9a;">환생 의식 ♻️</div>
             </div>
         </div>
 
@@ -262,7 +281,7 @@ if ($commander_stat_max > $commander_stat_min) {
                     <label class="switch"><input type="checkbox" id="auto-explore-toggle" onchange="toggleAutoExploreMode()"><span class="slider"></span></label>
                     <span id="auto-explore-status-text" style="color: #aaa; font-weight: bold; font-size: 0.9rem;">[OFF]</span>
                 </div>
-                <div style="display:flex; align-items:center; gap:6px;" title="HP 45% 이하 또는 MP 35% 이하일 때 자동으로 휴식합니다.">
+                <div style="display:flex; align-items:center; gap:6px;" title="성향에 따라 자동 휴식 기준이 달라집니다. HP 20%~70% 구간에서 자동 발동하며, 조심할수록 더 일찍 쉽니다.">
                     <span style="color: #aaa; font-size: 0.9rem;">자동 휴식</span>
                     <label class="switch"><input type="checkbox" id="auto-rest-toggle" onchange="toggleAutoRestMode()"><span class="slider"></span></label>
                     <span id="auto-rest-status-text" style="color: #aaa; font-weight: bold; font-size: 0.9rem;">[OFF]</span>
@@ -371,6 +390,14 @@ if ($commander_stat_max > $commander_stat_min) {
         </div>
     </div>
 
+    <div id="reincarnation-modal" class="modal-overlay">
+        <div class="modal-content" style="border-color:#b388ff; max-width:560px;">
+            <button onclick="document.getElementById('reincarnation-modal').style.display='none'" style="float:right; background:#d32f2f; color:white; border:none; padding:5px 10px; cursor:pointer;">닫기 ✖</button>
+            <h2 style="margin-top:0; color:#d1c4e9;">♻️ 환생 의식</h2>
+            <div id="reincarnation-content-area" style="line-height:1.7;">불러오는 중...</div>
+        </div>
+    </div>
+
     <!-- 도감 모달 -->
     <div id="book-modal" class="modal-overlay">
         <div class="modal-content">
@@ -391,7 +418,8 @@ if ($commander_stat_max > $commander_stat_min) {
                 <div style="margin-bottom:10px;"><b>🍀 LUK</b><br>치명타 확률 floor(LUK/2)%, 치명 배율 1.5 + LUK*0.01, 탐험 골드 획득량 (1 + LUK*0.01)배, 함정 행운 발동 확률 min(40, floor(LUK/2))%.<br>소환은 신화가 제외되며, LUK는 전설(+0.03%/35), 영웅(+0.10%/20), 희귀(+0.20%/15) 가중치 보정에만 적용됩니다.</div>
                 <div style="margin-bottom:10px;"><b>🗡️ STR</b><br>사령관 기본 공격력 증가(기본식에 STR*2), 물리 영웅 피해 +2%/10 STR, 함정 파괴 확률 min(35, floor(STR/3))%.</div>
                 <div style="margin-bottom:10px;"><b>🔮 MAG</b><br>액티브 스킬 피해/회복이 MAG 비례 증폭, 마법 영웅 피해 +2%/10 MAG, 탐색 시 MP 자연회복 floor(MAG/10).</div>
-                <div><b>💨 AGI</b><br>도주 확률 40 + AGI, 사령관/영웅 연속 공격 확률 floor(AGI/5)%.</div>
+                <div style="margin-bottom:10px;"><b>💨 AGI</b><br>도주 확률 40 + AGI, 사령관/영웅 연속 공격 확률 floor(AGI/5)%.</div>
+                <div><b>🎭 성향</b><br>자동 휴식 HP 기준은 <b>70% - 성향×0.5%</b>입니다. 0이면 HP 70%부터 쉬고, 100이면 20%까지 버팁니다. 성향 80 이상은 상자에서 50:50 극단 결과(보상 200% 또는 함정 피해 200%), 자동 전투는 공격 스킬 우선. 성향 20 이하는 상자 보상 80% / 함정 피해 50%, 자동 전투는 힐·방어 우선입니다.<br>또한 성향은 도주 성공률/도주 골드 패널티, 전투 첫 턴 선공 판정, 치명타(대담)·회피/상태 저항(신중) 보정에도 영향을 줍니다.</div>
             </div>
         </div>
     </div>
@@ -423,7 +451,10 @@ if ($commander_stat_max > $commander_stat_min) {
 
     <div class="panel right-panel">
         <div class="section-header" style="margin-top:0;">
-            <h2 style="margin:0; padding:0; border:none;">⚔️ 출전 덱 (<span id="deck-count-display">0</span>/5)</h2>
+            <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+                <div class="btn" style="padding:8px 12px; font-size:0.85rem; background:#673ab7; white-space:nowrap;" onclick="openCombineModal()">조합/진화 🔮</div>
+                <h2 style="margin:0; padding:0; border:none;">⚔️ 출전 덱 (<span id="deck-count-display">0</span>/5)</h2>
+            </div>
             <span class="section-arrow-toggle" data-collapse-target="deck-list-body" role="button" tabindex="0" aria-label="출전 덱 접기">▲</span>
         </div>
         <div id="deck-list-body" class="collapsible-body">
@@ -443,11 +474,8 @@ if ($commander_stat_max > $commander_stat_min) {
         </div>
 
         <div class="section-header" style="margin-top:10px;">
-            <h2 style="margin:0; padding:0; border:none;">🎒 보유 영웅</h2>
-            <div style="display:flex; align-items:center; gap:8px;">
-                <div class="btn" style="padding:8px 12px; font-size:0.85rem; background:#673ab7; white-space:nowrap;" onclick="openCombineModal()">조합/진화 🔮</div>
-                <span class="section-arrow-toggle" data-collapse-target="hero-list-body" role="button" tabindex="0" aria-label="보유 영웅 접기">▲</span>
-            </div>
+            <h2 style="margin:0; padding:0; border:none;">🎒 보유 영웅 (<span id="hero-owned-display"><?= (int)$hero_owned_count ?></span>/<span id="hero-limit-display"><?= (int)$hero_limit_count ?></span>)</h2>
+            <span class="section-arrow-toggle" data-collapse-target="hero-list-body" role="button" tabindex="0" aria-label="보유 영웅 접기">▲</span>
         </div>
         <div id="hero-list-body" class="collapsible-body">
             <div id="hero-list"></div>
@@ -472,9 +500,14 @@ if ($commander_stat_max > $commander_stat_min) {
         window.playerCurrentMp = <?= (int)$commander['mp'] ?>;
         window.isDead = <?= ($commander['hp'] <= 0) ? 'true' : 'false' ?>;
         window.isCombat = <?= ($commander['is_combat'] == 1) ? 'true' : 'false' ?>;
+        window.commanderDisposition = <?= (int)($commander['disposition'] ?? 50) ?>;
         window.currentMobName = <?= json_encode($commander['mob_name'] ?? '') ?>;
         window.currentMobHp = <?= (int)$commander['mob_hp'] ?>;
         window.currentMobMaxHp = <?= (int)$commander['mob_max_hp'] ?>;
+        window.reincarnationCount = <?= (int)($commander['reincarnation_count'] ?? 0) ?>;
+        window.reincarnationStatBonus = <?= (int)($commander['reincarnation_stat_bonus'] ?? 0) ?>;
+        window.reincarnationLevelTotal = <?= (int)($commander['reincarnation_level_total'] ?? 0) ?>;
+        window.lifetimeGoldEarned = <?= (int)($commander['lifetime_gold_earned'] ?? 0) ?>;
         // 초기 스탯 포인트 버튼 갱신을 위해 DOM 로드 후 실행될 JS에 값 전달
         window.initialStatPoints = <?= (int)($commander['stat_points'] ?? 0) ?>;
         window.initialIntroStory = <?= json_encode($intro_story_payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
