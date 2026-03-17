@@ -5298,7 +5298,7 @@ function handle_reincarnate_preview(PDO $pdo) {
 			'gold_bonus' => $gold_bonus,
 			'base_gold_after_reincarnate' => 1000,
 			'projected_start_gold' => 1000 + $gold_bonus,
-			'kept_systems' => '영웅/유물/내실 강화 유지'
+			'kept_systems' => '유물/내실 강화 유지, 영웅/출전 덱/파견 초기화'
 		));
 	} catch (Exception $e) {
 		json_error($e->getMessage());

@@ -1639,7 +1639,7 @@ async function openReincarnationModal() {
             <div>환생 누적 랜덤 보너스 총합: <b>+${Number(data.projected_stat_bonus_total).toLocaleString()}</b></div>
         </div>
         <div style="background:#161616; border:1px solid #333; border-radius:8px; padding:12px; color:#bdbdbd; font-size:0.92rem; margin-bottom:12px;">
-            영웅, 유물, 내실 강화는 유지됩니다. 확인을 누르면 재탄생 생성창으로 이동하며, 그곳에서 직업 선택과 주사위 확정을 마치면 환생이 완료됩니다.
+            유물과 내실 강화는 유지됩니다. 보유 영웅, 출전 덱, 토벌대 파견 기록은 모두 초기화됩니다. 확인을 누르면 재탄생 생성창으로 이동하며, 그곳에서 직업 선택과 주사위 확정을 마치면 환생이 완료됩니다.
         </div>
         <button onclick="confirmReincarnation()" style="width:100%; padding:12px; border:none; border-radius:6px; background:#7b1fa2; color:#fff; font-weight:bold; cursor:pointer;">환생 시작</button>
     `;

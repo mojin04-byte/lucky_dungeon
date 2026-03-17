@@ -26,6 +26,14 @@ function distribute_random_bonus_stats_local(&$stats, $bonus_points) {
     }
 }
 
+function get_starting_hp_from_vit($vit) {
+    return 100 + (max(0, (int)$vit) * 10);
+}
+
+function get_starting_mp_from_mag($mag) {
+    return 50 + (max(0, (int)$mag) * 5);
+}
+
 $reincarnation_mode = false;
 $reincarnation_pending = null;
 $nickname = '';
@@ -119,6 +127,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $luk = (int)$bonus_pack['luk'];
                 $men = (int)$bonus_pack['men'];
                 $vit = (int)$bonus_pack['vit'];
+                $start_max_hp = get_starting_hp_from_vit($vit);
+                $start_max_mp = get_starting_mp_from_mag($mag);
 
                 $pending_uid = (int)($reincarnation_pending['uid'] ?? 0);
                 if ($pending_uid <= 0) {
@@ -136,10 +146,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$current_cmd) throw new \Exception('유저 정보 없음');
                 if ((int)$current_cmd['is_combat'] === 1) throw new \Exception('전투 중에는 환생을 완료할 수 없습니다.');
 
+                $pdo->prepare("DELETE eh FROM tb_expedition_heroes eh INNER JOIN tb_expeditions e ON eh.expedition_id = e.expedition_id WHERE e.uid = ?")
+                    ->execute([$pending_uid]);
+                $pdo->prepare("DELETE FROM tb_expeditions WHERE uid = ?")->execute([$pending_uid]);
+                $pdo->prepare("DELETE FROM tb_heroes WHERE uid = ?")->execute([$pending_uid]);
+
                 $update_stmt = $pdo->prepare("UPDATE tb_commanders SET
                     class_type = ?,
-                    hp = 100, max_hp = 100,
-                    mp = 50, max_mp = 50,
+                    hp = ?, max_hp = ?,
+                    mp = ?, max_mp = ?,
                     stat_str = ?, stat_mag = ?, stat_agi = ?, stat_luk = ?, stat_men = ?, stat_vit = ?,
                     disposition = ?,
                     gold = ?,
@@ -157,6 +172,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     WHERE uid = ?");
                 $update_stmt->execute([
                     $class_type,
+                    $start_max_hp, $start_max_hp,
+                    $start_max_mp, $start_max_mp,
                     $str, $mag, $agi, $luk, $men, $vit,
                     $disp,
                     $pending_start_gold,
@@ -167,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pending_uid
                 ]);
 
-                $log = "♻️ <b>[환생 의식 완료]</b> 새로운 육신이 완성되었습니다. 누적 레벨 {$pending_life_levels} 반영(+{$pending_new_bonus_gain} 보너스), 시작 골드 <b>{$pending_start_gold}G</b> (누적 골드 보너스 {$gold_bonus}G).";
+                $log = "♻️ <b>[환생 의식 완료]</b> 새로운 육신이 완성되었습니다. 누적 레벨 {$pending_life_levels} 반영(+{$pending_new_bonus_gain} 보너스), 시작 골드 <b>{$pending_start_gold}G</b> (누적 골드 보너스 {$gold_bonus}G), 보유 영웅과 출전 덱은 모두 초기화되었습니다.";
                 $pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute([$pending_uid, $log]);
                 $pdo->commit();
 
@@ -182,12 +199,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
+            $start_max_hp = get_starting_hp_from_vit($vit);
+            $start_max_mp = get_starting_mp_from_mag($mag);
+
             $stmt = $pdo->prepare("
                 INSERT INTO tb_commanders
                 (nickname, class_type, narrative_tone, hp, max_hp, mp, max_mp, stat_str, stat_mag, stat_agi, stat_luk, stat_men, stat_vit, disposition, gold, current_floor, stat_points, level, exp, background_story)
-                VALUES (?, ?, ?, 100, 100, 50, 50, ?, ?, ?, ?, ?, ?, ?, 1000, 1, 5, 1, 0, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1000, 1, 5, 1, 0, ?)
             ");
-            $stmt->execute([$nickname, $class_type, $narrative_tone, $str, $mag, $agi, $luk, $men, $vit, $disp, $background_story]);
+            $stmt->execute([$nickname, $class_type, $narrative_tone, $start_max_hp, $start_max_hp, $start_max_mp, $start_max_mp, $str, $mag, $agi, $luk, $men, $vit, $disp, $background_story]);
 
             $new_uid = $pdo->lastInsertId();
 
@@ -311,6 +331,7 @@ $welcome_text = $reincarnation_mode
             </div>
             <div class="roll-note">
                 선택한 클래스의 +10 보너스는 최종 생성 시 적용됩니다.
+                시작 HP는 VIT, 시작 MP는 MAG 수치에 비례해 계산됩니다.
                 <?php if ($reincarnation_mode): ?>
                     환생 누적 보너스 +<?= (int)$pending_bonus_total ?>는 확정 시 랜덤 분배됩니다.
                 <?php endif; ?>
