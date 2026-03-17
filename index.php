@@ -240,6 +240,8 @@ if ($commander_stat_max > $commander_stat_min) {
             <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                 <div class="btn" onclick="openRanking()" style="padding: 10px; font-size: 0.9rem;">명예의 전당 🏆</div>
                 <div class="btn" onclick="openRelicModal()" style="padding: 10px; font-size: 0.9rem; background:#6d4c41;">유물 제련 🗿</div>
+                <div class="btn" onclick="openItemModal()" style="padding: 10px; font-size: 0.9rem; background:#546e7a;">아이템 가방 🎒</div>
+                <div class="btn" onclick="openProgressionModal()" style="padding: 10px; font-size: 0.9rem; background:#4a148c;">내실 강화 🏯</div>
                 <div class="btn" onclick="document.getElementById('stat-help-modal').style.display='flex'" style="padding: 10px; font-size: 0.9rem; background:#455a64; grid-column: span 2;">스탯 공식 도움말 📘</div>
             </div>
         </div>
@@ -348,6 +350,24 @@ if ($commander_stat_max > $commander_stat_min) {
             <button onclick="document.getElementById('relic-modal').style.display='none'" style="float:right; background:#d32f2f; color:white; border:none; padding:5px 10px; cursor:pointer;">닫기 ✖</button>
             <h2 style="margin-top:0;">🗿 유물 제련소</h2>
             <div id="relic-list-area">불러오는 중...</div>
+        </div>
+    </div>
+
+    <!-- 아이템 가방 모달 -->
+    <div id="item-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button onclick="document.getElementById('item-modal').style.display='none'" style="float:right; background:#d32f2f; color:white; border:none; padding:5px 10px; cursor:pointer;">닫기 ✖</button>
+            <h2 style="margin-top:0;">🎒 아이템 가방</h2>
+            <div id="item-list-area">불러오는 중...</div>
+        </div>
+    </div>
+
+    <!-- 내실 강화 / 제단 축복 모달 -->
+    <div id="progression-modal" class="modal-overlay">
+        <div class="modal-content" style="border-color:#ce93d8; max-width:520px;">
+            <button onclick="document.getElementById('progression-modal').style.display='none'" style="float:right; background:#d32f2f; color:white; border:none; padding:5px 10px; cursor:pointer;">닫기 ✖</button>
+            <h2 style="margin-top:0; color:#ce93d8;">🏯 내실 강화 &amp; 제단 축복</h2>
+            <div id="progression-content-area">불러오는 중...</div>
         </div>
     </div>
 

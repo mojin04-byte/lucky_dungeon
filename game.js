@@ -1426,11 +1426,91 @@ const openRanking = () => openModal('ranking-modal', 'ranking-list-area', 'ranki
 const openBookModal = () => openModal('book-modal', 'book-list-area', 'book');
 const openHeroLevelupModal = () => openModal('hero-levelup-modal', 'hero-levelup-list-area', 'hero_levelup_view');
 const openRelicModal = () => openModal('relic-modal', 'relic-list-area', 'relic_info');
+const openItemModal = () => openModal('item-modal', 'item-list-area', 'item_info');
 const openCombineModal = () => {
     document.getElementById('combine-modal').style.display = 'flex';
     document.getElementById('combine-list-area').innerHTML = '불러오는 중...';
     combineHero('view', '');
 };
+
+// ==================================
+// 내실 강화 / 제단 축복 UI
+// ==================================
+async function openProgressionModal() {
+    const modal = document.getElementById('progression-modal');
+    const area = document.getElementById('progression-content-area');
+    if (!modal || !area) return;
+    modal.style.display = 'flex';
+    area.innerHTML = '<span style="color:#aaa;">불러오는 중...</span>';
+
+    const data = await callApi('get_progression_state');
+    if (!data || data.status !== 'success') {
+        area.innerHTML = '<span style="color:#f44336;">불러오기 실패</span>';
+        return;
+    }
+
+    let html = `<div style="margin-bottom:14px; color:#ffcc80; font-size:0.95rem;">💰 보유 골드: <b>${Number(data.gold).toLocaleString()}G</b> &nbsp;|&nbsp; 🧑‍🤝‍🧑 영웅 보유: <b>${data.hero_owned}/${data.hero_limit}</b>명</div>`;
+
+    // 내실 강화 섹션
+    html += `<div style="color:#90caf9; font-weight:bold; margin-bottom:8px; border-bottom:1px solid #333; padding-bottom:4px;">⚔️ 내실 강화</div>`;
+    for (const [key, upg] of Object.entries(data.upgrades)) {
+        const isCapped = upg.current_level >= upg.max_level;
+        const costText = isCapped ? '최대' : `${Number(upg.cost).toLocaleString()}G`;
+        const btnDisabled = isCapped ? 'disabled' : '';
+        const btnColor = isCapped ? '#555' : '#e65100';
+        html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:6px; background:#1f1f1f; border-radius:4px;">
+            <div>
+                <span style="color:#ffe082; font-weight:bold;">${upg.label}</span>
+                <span style="color:#aaa; font-size:0.8rem; margin-left:6px;">Lv.${upg.current_level}/${upg.max_level}</span>
+                <div style="color:#888; font-size:0.78rem;">${upg.desc}</div>
+            </div>
+            <button onclick="upgradeProgression('${key}')" ${btnDisabled} style="background:${btnColor}; color:#fff; border:none; border-radius:4px; padding:5px 10px; cursor:pointer; min-width:70px;">${costText}</button>
+        </div>`;
+    }
+
+    // 제단 축복 섹션
+    const b = data.blessing;
+    html += `<div style="color:#ce93d8; font-weight:bold; margin:14px 0 8px; border-bottom:1px solid #333; padding-bottom:4px;">✨ 제단 축복</div>`;
+    html += `<div style="background:#1f1f1f; border-radius:6px; padding:10px; margin-bottom:8px;">
+        <div style="color:#ffe082;">현재: <b>${b.label}</b>${b.value > 0 ? ` +${b.value}%` : ''}</div>
+        <div style="color:#aaa; font-size:0.8rem;">${b.desc}</div>
+        <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+            <span style="color:#888; font-size:0.8rem;">리롤 ${b.reroll_count}회 | 다음 비용: <b>${Number(b.reroll_cost).toLocaleString()}G</b></span>
+            <button onclick="rerollBlessing()" style="background:#4a148c; color:#fff; border:none; border-radius:4px; padding:5px 12px; cursor:pointer;">🎲 축복 갱신</button>
+        </div>
+    </div>`;
+
+    area.innerHTML = html;
+    applyButtonTooltips(area);
+}
+
+async function upgradeProgression(upgradeKey) {
+    const formData = new URLSearchParams();
+    formData.append('upgrade_key', upgradeKey);
+    const data = await callApi('progression_upgrade', { method: 'POST', body: formData });
+    if (data && data.status === 'success') {
+        if (data.new_gold !== undefined) {
+            document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+        }
+        addLog(data.msg, true);
+        openProgressionModal();
+    } else if (data) {
+        addLog(data.msg || '강화 실패', true);
+    }
+}
+
+async function rerollBlessing() {
+    const data = await callApi('blessing_reroll', { method: 'POST', body: new URLSearchParams() });
+    if (data && data.status === 'success') {
+        if (data.new_gold !== undefined) {
+            document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+        }
+        addLog(data.msg, true);
+        openProgressionModal();
+    } else if (data) {
+        addLog(data.msg || '리롤 실패', true);
+    }
+}
 
 async function levelUpHero(invId) {
     const formData = new URLSearchParams();
@@ -1454,6 +1534,101 @@ async function upgradeRelic() {
         document.getElementById('relic-list-area').innerHTML = data.html;
         applyButtonTooltips(document.getElementById('relic-list-area'));
         document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+    } else if (data) {
+        addLog(data.msg, true);
+    }
+}
+
+async function buyItem(itemCode) {
+    const formData = new URLSearchParams();
+    formData.append('item_code', itemCode);
+    const data = await callApi('item_buy', { method: 'POST', body: formData });
+    if (data && data.status === 'success') {
+        const listArea = document.getElementById('item-list-area');
+        if (listArea && data.html !== undefined) {
+            listArea.innerHTML = data.html;
+            applyButtonTooltips(listArea);
+        }
+        if (data.new_gold !== undefined) {
+            document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+        }
+        if (data.msg) addLog(data.msg, true);
+    } else if (data) {
+        addLog(data.msg, true);
+    }
+}
+
+async function useItem(itemId) {
+    const formData = new URLSearchParams();
+    formData.append('item_id', itemId);
+    const data = await callApi('item_use', { method: 'POST', body: formData });
+    if (data && data.status === 'success') {
+        const listArea = document.getElementById('item-list-area');
+        if (listArea && data.html !== undefined) {
+            listArea.innerHTML = data.html;
+            applyButtonTooltips(listArea);
+        }
+        if (data.new_gold !== undefined) {
+            document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+        }
+        if (
+            data.new_hp !== undefined && data.max_hp !== undefined &&
+            data.new_mp !== undefined && data.max_mp !== undefined
+        ) {
+            updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
+        }
+        if (data.new_floor !== undefined) {
+            updateFloorDisplay(data.new_floor);
+        }
+        if (data.left_combat) {
+            window.currentMobName = '';
+            window.currentMobHp = 0;
+            window.currentMobMaxHp = 0;
+            exitToExploreState();
+        }
+        if (data.deck_html !== undefined) {
+            updateInventoryUI(data);
+        }
+        if (data.msg) addLog(data.msg, true);
+    } else if (data) {
+        addLog(data.msg, true);
+    }
+}
+
+async function toggleEquipItem(itemId, action) {
+    const formData = new URLSearchParams();
+    formData.append('item_id', itemId);
+    formData.append('action', action);
+    const data = await callApi('item_toggle_equip', { method: 'POST', body: formData });
+    if (data && data.status === 'success') {
+        const listArea = document.getElementById('item-list-area');
+        if (listArea && data.html !== undefined) {
+            listArea.innerHTML = data.html;
+            applyButtonTooltips(listArea);
+        }
+        if (data.new_gold !== undefined) {
+            document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+        }
+        if (data.msg) addLog(data.msg, true);
+    } else if (data) {
+        addLog(data.msg, true);
+    }
+}
+
+async function synthesizeEquipment(baseGrade) {
+    const formData = new URLSearchParams();
+    formData.append('base_grade', baseGrade);
+    const data = await callApi('item_synthesize', { method: 'POST', body: formData });
+    if (data && data.status === 'success') {
+        const listArea = document.getElementById('item-list-area');
+        if (listArea && data.html !== undefined) {
+            listArea.innerHTML = data.html;
+            applyButtonTooltips(listArea);
+        }
+        if (data.new_gold !== undefined) {
+            document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+        }
+        if (data.msg) addLog(data.msg, true);
     } else if (data) {
         addLog(data.msg, true);
     }
