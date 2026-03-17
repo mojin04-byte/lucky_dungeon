@@ -5310,7 +5310,7 @@ function handle_reincarnate(PDO $pdo) {
 	$uid = get_uid_or_fail();
 	try {
 		$pdo->beginTransaction();
-		$stmt = $pdo->prepare("SELECT * FROM tb_commanders WHERE uid = ? FOR UPDATE");
+		$stmt = $pdo->prepare("SELECT uid, nickname, level, lifetime_gold_earned, reincarnation_count, reincarnation_level_total, reincarnation_stat_bonus, is_combat FROM tb_commanders WHERE uid = ? FOR UPDATE");
 		$stmt->execute(array($uid));
 		$cmd = $stmt->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
@@ -5322,77 +5322,34 @@ function handle_reincarnate(PDO $pdo) {
 		$new_level_total = max(0, (int)$cmd['reincarnation_level_total']) + $life_levels;
 		$new_stat_bonus_total = max(0, (int)$cmd['reincarnation_stat_bonus']) + $new_bonus_gain;
 
-		$rolled = roll_commander_base_stats_by_class((string)$cmd['class_type']);
-		distribute_random_bonus_stats($rolled, $new_stat_bonus_total);
-
 		$gold_bonus = (int)floor(max(0, (int)$cmd['lifetime_gold_earned']) * 0.10);
 		$new_gold = 1000 + $gold_bonus;
 
-		$new_max_hp = 100;
-		$new_max_mp = 50;
-		$new_hp = $new_max_hp;
-		$new_mp = $new_max_mp;
-		$new_disposition = normalize_disposition_value(isset($rolled['disposition']) ? $rolled['disposition'] : rand(1, 100));
+		$_SESSION['reincarnation_pending'] = array(
+			'uid' => (int)$uid,
+			'nickname' => (string)$cmd['nickname'],
+			'new_reincarnation_count' => (int)$new_reincarnation_count,
+			'new_level_total' => (int)$new_level_total,
+			'new_stat_bonus_total' => (int)$new_stat_bonus_total,
+			'new_bonus_gain' => (int)$new_bonus_gain,
+			'life_levels' => (int)$life_levels,
+			'gold_bonus' => (int)$gold_bonus,
+			'start_gold' => (int)$new_gold,
+			'created_at' => time(),
+		);
 
-		$pdo->prepare("UPDATE tb_commanders SET
-			gold = ?,
-			current_floor = 1,
-			hp = ?, max_hp = ?,
-			mp = ?, max_mp = ?,
-			stat_str = ?, stat_mag = ?, stat_agi = ?, stat_luk = ?, stat_men = ?, stat_vit = ?,
-			disposition = ?,
-			stat_points = 5,
-			level = 1,
-			exp = 0,
-			is_combat = 0,
-			mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0,
-			reincarnation_count = ?,
-			reincarnation_level_total = ?,
-			reincarnation_stat_bonus = ?
-			WHERE uid = ?")->execute(array(
-			$new_gold,
-			$new_hp, $new_max_hp,
-			$new_mp, $new_max_mp,
-			(int)$rolled['str'], (int)$rolled['mag'], (int)$rolled['agi'], (int)$rolled['luk'], (int)$rolled['men'], (int)$rolled['vit'],
-			$new_disposition,
-			$new_reincarnation_count,
-			$new_level_total,
-			$new_stat_bonus_total,
-			$uid
-		));
-
-		unset($_SESSION['combat_state']);
-		reset_orc_frenzy_state();
-
-		$log = "♻️ <b>[환생 의식]</b> 기억은 남기고 육신을 새로 벼렸습니다. 누적 레벨 {$life_levels} 반영(+{$new_bonus_gain} 보너스), 시작 골드 <b>{$new_gold}G</b> (누적 골드 보너스 {$gold_bonus}G).";
-		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
 		$pdo->commit();
 
 		echo json_encode(array(
 			'status' => 'success',
-			'log' => $log,
-			'new_floor' => 1,
-			'new_hp' => $new_hp,
-			'max_hp' => $new_max_hp,
-			'new_mp' => $new_mp,
-			'max_mp' => $new_max_mp,
-			'new_gold' => $new_gold,
-			'new_level' => 1,
-			'new_exp' => 0,
-			'exp_to_next' => get_required_exp_for_next_level(1),
-			'stat_points' => 5,
-			'new_disposition' => $new_disposition,
+			'log' => '♻️ 환생 준비가 완료되었습니다. 재탄생 생성창에서 직업과 주사위를 확정하세요.',
+			'redirect_url' => 'character_create.php?mode=reincarnation',
+			'projected_start_gold' => $new_gold,
+			'projected_new_bonus_gain' => $new_bonus_gain,
 			'reincarnation_count' => $new_reincarnation_count,
 			'reincarnation_level_total' => $new_level_total,
 			'reincarnation_stat_bonus' => $new_stat_bonus_total,
-			'stats' => array(
-				'str' => (int)$rolled['str'],
-				'mag' => (int)$rolled['mag'],
-				'agi' => (int)$rolled['agi'],
-				'luk' => (int)$rolled['luk'],
-				'men' => (int)$rolled['men'],
-				'vit' => (int)$rolled['vit'],
-			)
+			'pending' => true,
 		));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();

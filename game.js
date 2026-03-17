@@ -1632,14 +1632,14 @@ async function openReincarnationModal() {
     area.innerHTML = `
         <div style="margin-bottom:12px; color:#d1c4e9;">현재 레벨 <b>Lv.${Number(data.level).toLocaleString()}</b>, 환생 <b>${Number(data.reincarnation_count).toLocaleString()}회</b></div>
         <div style="background:#1d1d1d; border:1px solid #3d2f5e; border-radius:8px; padding:12px; margin-bottom:10px;">
-            <div style="color:#ffcc80; font-weight:bold; margin-bottom:6px;">환생 후 즉시 적용</div>
+            <div style="color:#ffcc80; font-weight:bold; margin-bottom:6px;">환생 완료 시 적용</div>
             <div>시작 골드: <b>${Number(data.projected_start_gold).toLocaleString()}G</b> (누적 골드 보너스 ${Number(data.gold_bonus).toLocaleString()}G)</div>
             <div>이번 생 누적 레벨 반영: <b>${Number(data.life_levels).toLocaleString()}</b></div>
             <div>이번 환생 추가 스탯 보너스: <b>+${Number(data.new_stat_bonus_gain).toLocaleString()}</b></div>
             <div>환생 누적 랜덤 보너스 총합: <b>+${Number(data.projected_stat_bonus_total).toLocaleString()}</b></div>
         </div>
         <div style="background:#161616; border:1px solid #333; border-radius:8px; padding:12px; color:#bdbdbd; font-size:0.92rem; margin-bottom:12px;">
-            영웅, 유물, 내실 강화는 유지됩니다. 사령관 레벨/경험치/스탯/층수/현재 전투 상태만 초기화되며, 새 육신은 클래스 기반 기본 스탯 후 랜덤 재분배로 시작합니다.
+            영웅, 유물, 내실 강화는 유지됩니다. 확인을 누르면 재탄생 생성창으로 이동하며, 그곳에서 직업 선택과 주사위 확정을 마치면 환생이 완료됩니다.
         </div>
         <button onclick="confirmReincarnation()" style="width:100%; padding:12px; border:none; border-radius:6px; background:#7b1fa2; color:#fff; font-weight:bold; cursor:pointer;">환생 시작</button>
     `;
@@ -1648,7 +1648,7 @@ async function openReincarnationModal() {
 async function confirmReincarnation() {
     const first = window.confirm('환생을 진행하면 현재 사령관 레벨/경험치/층수/전투 상태가 초기화됩니다. 계속합니까?');
     if (!first) return;
-    const second = window.confirm('정말 환생하시겠습니까? 환생 후 스탯은 클래스 기반으로 다시 랜덤 분배됩니다.');
+    const second = window.confirm('정말 환생하시겠습니까? 확인 후 재탄생 생성창으로 이동합니다.');
     if (!second) return;
 
     const data = await callApi('reincarnate', { method: 'POST', body: new URLSearchParams() });
@@ -1659,6 +1659,12 @@ async function confirmReincarnation() {
 
     const modal = document.getElementById('reincarnation-modal');
     if (modal) modal.style.display = 'none';
+
+    if (data.redirect_url) {
+        addLog(data.log || '♻️ 환생 생성창으로 이동합니다.', true);
+        window.location.href = data.redirect_url;
+        return;
+    }
 
     window.reincarnationCount = Number(data.reincarnation_count || 0);
     window.reincarnationStatBonus = Number(data.reincarnation_stat_bonus || 0);

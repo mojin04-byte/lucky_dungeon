@@ -7,6 +7,17 @@ require_once 'bootstrap.php';
 if (!isset($_SESSION['uid'])) { header("Location: login.php"); exit; }
 $uid = $_SESSION['uid'];
 
+if (isset($_SESSION['reincarnation_pending']) && is_array($_SESSION['reincarnation_pending'])) {
+    $pending_uid = (int)($_SESSION['reincarnation_pending']['uid'] ?? 0);
+    if ($pending_uid > 0 && $pending_uid === (int)$uid) {
+        header("Location: character_create.php?mode=reincarnation");
+        exit;
+    }
+    if ($pending_uid > 0 && $pending_uid !== (int)$uid) {
+        unset($_SESSION['reincarnation_pending']);
+    }
+}
+
 try {
     $stmt = $pdo->prepare("SELECT * FROM tb_commanders WHERE uid = ?");
     $stmt->execute([$uid]);
