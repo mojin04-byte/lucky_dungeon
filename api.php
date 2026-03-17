@@ -981,7 +981,7 @@ function get_or_create_commander_progression_state(PDO $pdo, $uid, $for_update =
 
 function get_hero_capacity_limit_by_progression($progression_state) {
 	$tier = max(0, (int)(isset($progression_state['hero_capacity_tier']) ? $progression_state['hero_capacity_tier'] : 0));
-	return 30 + ($tier * 5);
+	return 20 + $tier;
 }
 
 function get_blessing_type_catalog() {
@@ -1116,7 +1116,7 @@ function get_progression_upgrade_catalog() {
 		'def' => array('column' => 'mastery_def_level', 'label' => '강철 피부', 'effect' => '받는 피해 -1%', 'base_cost' => 920, 'growth' => 1.54, 'max_level' => 120),
 		'gold' => array('column' => 'mastery_gold_level', 'label' => '황금 감각', 'effect' => '골드 획득 +3%', 'base_cost' => 980, 'growth' => 1.56, 'max_level' => 120),
 		'drop' => array('column' => 'mastery_drop_level', 'label' => '전리품 감별', 'effect' => '드랍 가중치 +5%', 'base_cost' => 1000, 'growth' => 1.58, 'max_level' => 120),
-		'hero_cap' => array('column' => 'hero_capacity_tier', 'label' => '용병 수송 마차', 'effect' => '영웅 보유 한도 +5명', 'base_cost' => 2400, 'growth' => 1.72, 'max_level' => 30)
+		'hero_cap' => array('column' => 'hero_capacity_tier', 'label' => '용병 수송 마차', 'effect' => '영웅 보유 한도 +1명', 'base_cost' => 2400, 'growth' => 1.72, 'max_level' => 30)
 	);
 }
 
@@ -4000,7 +4000,9 @@ function handle_summon(PDO $pdo) {
 		$cmd = $st->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
 		$owned_total = get_total_hero_units($pdo, $uid);
-		if ($owned_total >= 30) throw new Exception('보유 영웅(출전 포함)은 최대 30명까지 가능합니다.');
+		$progression = get_or_create_commander_progression_state($pdo, $uid);
+		$hero_limit = get_hero_capacity_limit_by_progression($progression);
+		if ($owned_total >= $hero_limit) throw new Exception("보유 영웅(출전 포함)은 최대 {$hero_limit}명까지 가능합니다.");
 		if ((int)$cmd['gold'] < $summon_cost) throw new Exception('마력석(Gold)이 부족합니다.');
 		$pdo->prepare("UPDATE tb_commanders SET gold = gold - ? WHERE uid = ?")->execute(array($summon_cost, $uid));
 

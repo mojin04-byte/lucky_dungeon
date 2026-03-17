@@ -89,7 +89,7 @@ if ($commander_stat_max > $commander_stat_min) {
 }
 
 $hero_owned_count = 0;
-$hero_limit_count = 30;
+$hero_limit_count = 20;
 try {
     $owned_stmt = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM tb_heroes WHERE uid = ? AND quantity > 0");
     $owned_stmt->execute([$uid]);
@@ -101,9 +101,9 @@ try {
     $cap_stmt = $pdo->prepare("SELECT hero_capacity_tier FROM tb_commander_progression WHERE uid = ? LIMIT 1");
     $cap_stmt->execute([$uid]);
     $tier = (int)$cap_stmt->fetchColumn();
-    $hero_limit_count = 30 + max(0, $tier) * 5;
+    $hero_limit_count = 20 + max(0, $tier);
 } catch (\Throwable $e) {
-    $hero_limit_count = 30;
+    $hero_limit_count = 20;
 }
 ?>
 
