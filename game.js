@@ -11,6 +11,7 @@ const MONSTER_HP_STEP_DELAY = 150;
 const AUTO_ACTION_DELAY = 450;
 const AUTO_REST_HP_THRESHOLD = 0.45;
 const AUTO_REST_MP_THRESHOLD = 0.35;
+const COLLAPSE_STORAGE_PREFIX = 'ld_panel_collapsed_';
 
 const BATTLE_STAGE = {
     EXPLORE: 'explore',
@@ -79,6 +80,61 @@ function applyButtonTooltips(root = document) {
         const label = (btn.innerText || btn.textContent || '').replace(/\s+/g, ' ').trim();
         if (!label) return;
         btn.setAttribute('title', `${label} 실행`);
+    });
+}
+
+function updateCollapseToggleLabel(button, isCollapsed) {
+    if (!button) return;
+    button.innerText = isCollapsed ? '펼치기' : '접기';
+    button.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+}
+
+function setCollapsedState(targetId, isCollapsed) {
+    if (!targetId) return;
+    const body = document.getElementById(targetId);
+    if (!body) return;
+
+    body.classList.toggle('is-collapsed', !!isCollapsed);
+    const relatedButtons = document.querySelectorAll(`[data-collapse-target="${targetId}"]`);
+    relatedButtons.forEach((button) => updateCollapseToggleLabel(button, !!isCollapsed));
+
+    try {
+        localStorage.setItem(`${COLLAPSE_STORAGE_PREFIX}${targetId}`, isCollapsed ? '1' : '0');
+    } catch (err) {
+        console.warn('collapse state save failed', err);
+    }
+}
+
+function toggleCollapsedState(targetId) {
+    const body = document.getElementById(targetId);
+    if (!body) return;
+    const nextCollapsed = !body.classList.contains('is-collapsed');
+    setCollapsedState(targetId, nextCollapsed);
+}
+
+function initCollapsiblePanels() {
+    const toggleButtons = Array.from(document.querySelectorAll('[data-collapse-target]'));
+    if (toggleButtons.length === 0) return;
+
+    toggleButtons.forEach((button) => {
+        const targetId = button.getAttribute('data-collapse-target');
+        if (!targetId) return;
+        button.addEventListener('click', () => toggleCollapsedState(targetId));
+    });
+
+    const initializedTargets = new Set();
+    toggleButtons.forEach((button) => {
+        const targetId = button.getAttribute('data-collapse-target');
+        if (!targetId || initializedTargets.has(targetId)) return;
+        initializedTargets.add(targetId);
+
+        let shouldCollapse = false;
+        try {
+            shouldCollapse = localStorage.getItem(`${COLLAPSE_STORAGE_PREFIX}${targetId}`) === '1';
+        } catch (err) {
+            shouldCollapse = false;
+        }
+        setCollapsedState(targetId, shouldCollapse);
     });
 }
 
@@ -1492,6 +1548,7 @@ window.addEventListener('DOMContentLoaded', () => {
     toggleEquip(0, -1); 
     setupStatButtons();
     applyButtonTooltips();
+    initCollapsiblePanels();
     if (window.initialStatPoints !== undefined) updateStatUI(window.initialStatPoints);
     refreshCommanderStatHighlights();
     if (window.isDead) enterDeadState(); 

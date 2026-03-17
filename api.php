@@ -315,6 +315,98 @@ function tick_player_buffs(&$logs, $skip_keys = array()) {
 	}
 }
 
+function reset_orc_frenzy_state() {
+	$_SESSION['orc_frenzy_stacks'] = 0;
+	if (!isset($_SESSION['combat_state']) || !is_array($_SESSION['combat_state'])) return;
+	$_SESSION['combat_state']['orc_frenzy_stacks'] = 0;
+	$_SESSION['combat_state']['orc_no_kill_turns'] = 0;
+}
+
+function apply_orc_frenzy_decay(&$logs, $stack_max, $was_kill_turn) {
+	if (!isset($_SESSION['combat_state']) || !is_array($_SESSION['combat_state'])) return;
+	if (!isset($_SESSION['combat_state']['orc_no_kill_turns'])) {
+		$_SESSION['combat_state']['orc_no_kill_turns'] = 0;
+	}
+
+	$max_stack = max(0, (int)$stack_max);
+	if ($max_stack <= 0) {
+		reset_orc_frenzy_state();
+		return;
+	}
+
+	if ($was_kill_turn) {
+		$_SESSION['combat_state']['orc_no_kill_turns'] = 0;
+		return;
+	}
+
+	$_SESSION['combat_state']['orc_no_kill_turns'] = max(0, (int)$_SESSION['combat_state']['orc_no_kill_turns']) + 1;
+	if ((int)$_SESSION['combat_state']['orc_no_kill_turns'] < 2) return;
+
+	$current_stack = max(0, (int)(isset($_SESSION['orc_frenzy_stacks']) ? $_SESSION['orc_frenzy_stacks'] : 0));
+	if ($current_stack > 0) {
+		$current_stack -= 1;
+		$_SESSION['orc_frenzy_stacks'] = $current_stack;
+		$_SESSION['combat_state']['orc_frenzy_stacks'] = $current_stack;
+		if (is_array($logs)) {
+			$logs[] = "🪓 <span style='color:#ffcc80;'>[오크 광분]</span> 2턴 연속 처치 실패로 스택 감소 ({$current_stack}/{$max_stack})";
+		}
+	}
+	$_SESSION['combat_state']['orc_no_kill_turns'] = 0;
+}
+
+function append_balance_metrics_log(&$logs, $turn_damage, $incoming_damage, $hp_delta, $mp_delta, $first_hit_bonus_pct, $orc_bonus_pct) {
+	if (!isset($_SESSION['combat_state']) || !is_array($_SESSION['combat_state'])) return;
+	if (!isset($_SESSION['combat_state']['balance_metrics']) || !is_array($_SESSION['combat_state']['balance_metrics'])) {
+		$_SESSION['combat_state']['balance_metrics'] = array('turn' => 0, 'rows' => array());
+	}
+
+	$metric =& $_SESSION['combat_state']['balance_metrics'];
+	if (!isset($metric['turn'])) $metric['turn'] = 0;
+	if (!isset($metric['rows']) || !is_array($metric['rows'])) $metric['rows'] = array();
+
+	$metric['turn'] = (int)$metric['turn'] + 1;
+	$metric['rows'][] = array(
+		'damage' => max(0, (int)$turn_damage),
+		'incoming' => max(0, (int)$incoming_damage),
+		'hp_delta' => (int)$hp_delta,
+		'mp_delta' => (int)$mp_delta,
+		'first_hit' => max(0, (int)$first_hit_bonus_pct),
+		'orc_bonus' => max(0, (int)$orc_bonus_pct),
+	);
+
+	if (count($metric['rows']) > 10) {
+		$metric['rows'] = array_slice($metric['rows'], -10);
+	}
+
+	$rows = $metric['rows'];
+	$count = max(1, count($rows));
+	$sum_dmg = 0;
+	$sum_in = 0;
+	$sum_hp = 0;
+	$sum_mp = 0;
+	$sum_first = 0;
+	$sum_orc = 0;
+	foreach ($rows as $row) {
+		$sum_dmg += (int)$row['damage'];
+		$sum_in += (int)$row['incoming'];
+		$sum_hp += (int)$row['hp_delta'];
+		$sum_mp += (int)$row['mp_delta'];
+		$sum_first += (int)$row['first_hit'];
+		$sum_orc += (int)$row['orc_bonus'];
+	}
+
+	$avg_dmg = (int)round($sum_dmg / $count);
+	$avg_in = (int)round($sum_in / $count);
+	$avg_hp = (int)round($sum_hp / $count);
+	$avg_mp = (int)round($sum_mp / $count);
+	$avg_first = (int)round($sum_first / $count);
+	$avg_orc = (int)round($sum_orc / $count);
+
+	if (is_array($logs)) {
+		$logs[] = "📊 <span style='color:#b39ddb;'>[10턴 지표]</span> 평균 딜 {$avg_dmg} | 평균 피격 {$avg_in} | 순HP {$avg_hp} | MP 수지 {$avg_mp} | 첫타 {$avg_first}% | 오크 {$avg_orc}%";
+	}
+}
+
 function get_hero_traits($hero_name) {
 	global $hero_traits_map;
 
@@ -358,13 +450,146 @@ function get_hero_unit_count($hero) {
 	return 1;
 }
 
-function build_deck_synergy_summary($heroes, $assume_equipped = false) {
+function get_deck_synergy_profile($floor) {
+	$f = max(1, (int)$floor);
+	if ($f <= 40) {
+		return array(
+			'tier' => '초반',
+			'range' => '1-40',
+			'physical_penetration_pct' => 14,
+			'first_hit_bonus_pct' => 28,
+			'balance_damage_reduction_pct' => 14,
+			'mixed_crit_damage_bonus_pct' => 21,
+			'reward_bonus_pct' => 10,
+			'beast_double_attack_pp' => 8,
+			'machine_shield_pct' => 6,
+			'spirit_skill_damage_pct' => 18,
+			'spirit_mp_regen' => 3,
+			'demon_attack_bonus_pct' => 24,
+			'demon_hp_drain_pct' => 2,
+			'dragon_boss_damage_pct' => 18,
+			'orc_kill_stack_bonus_pct' => 6,
+			'orc_kill_stack_max' => 4,
+			'multirace_all_damage_pct' => 10,
+			'multirace_damage_reduction_pct' => 7,
+			'total_damage_softcap_pct' => 110,
+			'total_damage_hardcap_pct' => 140,
+			'total_damage_overflow_scale' => 0.45,
+			'first_hit_cap_pct' => 35,
+			'boss_damage_cap_pct' => 25,
+			'orc_stack_total_cap_pct' => 32,
+			'incoming_reduction_cap_pct' => 30,
+			'reward_bonus_cap_pct' => 15,
+			'dual_core_overlap_scale' => 0.70,
+			'demon_multirace_scale' => 0.70,
+			'demon_overload_threshold_pct' => 140,
+			'demon_overload_extra_drain_pct' => 1,
+		);
+	}
+	if ($f <= 120) {
+		return array(
+			'tier' => '중반',
+			'range' => '41-120',
+			'physical_penetration_pct' => 20,
+			'first_hit_bonus_pct' => 40,
+			'balance_damage_reduction_pct' => 20,
+			'mixed_crit_damage_bonus_pct' => 30,
+			'reward_bonus_pct' => 15,
+			'beast_double_attack_pp' => 12,
+			'machine_shield_pct' => 8,
+			'spirit_skill_damage_pct' => 25,
+			'spirit_mp_regen' => 5,
+			'demon_attack_bonus_pct' => 35,
+			'demon_hp_drain_pct' => 3,
+			'dragon_boss_damage_pct' => 25,
+			'orc_kill_stack_bonus_pct' => 10,
+			'orc_kill_stack_max' => 5,
+			'multirace_all_damage_pct' => 15,
+			'multirace_damage_reduction_pct' => 10,
+			'total_damage_softcap_pct' => 150,
+			'total_damage_hardcap_pct' => 190,
+			'total_damage_overflow_scale' => 0.45,
+			'first_hit_cap_pct' => 50,
+			'boss_damage_cap_pct' => 35,
+			'orc_stack_total_cap_pct' => 40,
+			'incoming_reduction_cap_pct' => 40,
+			'reward_bonus_cap_pct' => 20,
+			'dual_core_overlap_scale' => 0.70,
+			'demon_multirace_scale' => 0.70,
+			'demon_overload_threshold_pct' => 180,
+			'demon_overload_extra_drain_pct' => 1,
+		);
+	}
+
+	return array(
+		'tier' => '후반',
+		'range' => '121+',
+		'physical_penetration_pct' => 28,
+		'first_hit_bonus_pct' => 56,
+		'balance_damage_reduction_pct' => 28,
+		'mixed_crit_damage_bonus_pct' => 42,
+		'reward_bonus_pct' => 22,
+		'beast_double_attack_pp' => 16,
+		'machine_shield_pct' => 11,
+		'spirit_skill_damage_pct' => 35,
+		'spirit_mp_regen' => 7,
+		'demon_attack_bonus_pct' => 48,
+		'demon_hp_drain_pct' => 4,
+		'dragon_boss_damage_pct' => 35,
+		'orc_kill_stack_bonus_pct' => 12,
+		'orc_kill_stack_max' => 6,
+		'multirace_all_damage_pct' => 20,
+		'multirace_damage_reduction_pct' => 13,
+		'total_damage_softcap_pct' => 190,
+		'total_damage_hardcap_pct' => 240,
+		'total_damage_overflow_scale' => 0.45,
+		'first_hit_cap_pct' => 65,
+		'boss_damage_cap_pct' => 45,
+		'orc_stack_total_cap_pct' => 48,
+		'incoming_reduction_cap_pct' => 50,
+		'reward_bonus_cap_pct' => 25,
+		'dual_core_overlap_scale' => 0.70,
+		'demon_multirace_scale' => 0.70,
+		'demon_overload_threshold_pct' => 220,
+		'demon_overload_extra_drain_pct' => 2,
+	);
+}
+
+function build_deck_synergy_summary($heroes, $assume_equipped = false, $floor = 1) {
+	$profile = get_deck_synergy_profile($floor);
+
 	$summary = array(
 		'total_units' => 0,
 		'melee_units' => 0,
+		'ranged_units' => 0,
+		'physical_units' => 0,
 		'magic_units' => 0,
-		'attack_multiplier' => 1.0,
+		'race_counts' => array(),
+		'distinct_race_count' => 0,
+		'floor_tier' => $profile['tier'],
+		'floor_range' => $profile['range'],
 		'attack_bonus_percent' => 0,
+		'global_damage_bonus_percent' => 0,
+		'raw_total_damage_bonus_percent' => 0,
+		'total_damage_bonus_percent' => 0,
+		'physical_penetration_percent' => 0,
+		'first_hit_bonus_percent' => 0,
+		'incoming_damage_reduction_percent' => 0,
+		'incoming_damage_multiplier' => 1.0,
+		'crit_damage_bonus_percent' => 0,
+		'reward_bonus_percent' => 0,
+		'double_attack_bonus_point' => 0,
+		'shield_percent' => 0,
+		'skill_damage_bonus_percent' => 0,
+		'skill_damage_multiplier' => 1.0,
+		'mp_regen_per_turn' => 0,
+		'demon_hp_drain_percent' => 0,
+		'boss_damage_bonus_percent' => 0,
+		'orc_kill_stack_bonus_percent' => 0,
+		'orc_kill_stack_max' => 0,
+		'orc_stack_total_cap_percent' => 0,
+		'attack_multiplier' => 1.0,
+		'all_damage_multiplier' => 1.0,
 		'active_effects' => array(),
 	);
 
@@ -378,42 +603,211 @@ function build_deck_synergy_summary($heroes, $assume_equipped = false) {
 
 		$traits = get_hero_traits(isset($hero['hero_name']) ? $hero['hero_name'] : '');
 		if (in_array($traits['attack_range'], array('근거리', '근접'), true)) $summary['melee_units'] += $count;
+		if ($traits['attack_range'] === '원거리') $summary['ranged_units'] += $count;
+		if ($traits['attack_type'] === '물리') $summary['physical_units'] += $count;
 		if (in_array($traits['attack_type'], array('마법', '마법딜러'), true)) $summary['magic_units'] += $count;
+		$race = trim((string)$traits['race']);
+		if ($race !== '' && $race !== '미확인') {
+			if (!isset($summary['race_counts'][$race])) $summary['race_counts'][$race] = 0;
+			$summary['race_counts'][$race] += $count;
+		}
 	}
 
+	$summary['distinct_race_count'] = count($summary['race_counts']);
+
+	$human_units = isset($summary['race_counts']['인간']) ? (int)$summary['race_counts']['인간'] : 0;
+	$animal_units = isset($summary['race_counts']['동물']) ? (int)$summary['race_counts']['동물'] : 0;
+	$robot_units = isset($summary['race_counts']['로봇']) ? (int)$summary['race_counts']['로봇'] : 0;
+	$spirit_units = isset($summary['race_counts']['정령']) ? (int)$summary['race_counts']['정령'] : 0;
+	$demon_units = isset($summary['race_counts']['악마']) ? (int)$summary['race_counts']['악마'] : 0;
+	$dragon_units = isset($summary['race_counts']['드래곤']) ? (int)$summary['race_counts']['드래곤'] : 0;
+	$orc_units = isset($summary['race_counts']['오크']) ? (int)$summary['race_counts']['오크'] : 0;
+
+	$has_melee_core = false;
+	$has_magic_core = false;
+	$has_demon_contract = false;
+
 	if ($summary['melee_units'] >= 4) {
-		$summary['attack_multiplier'] += 0.5;
+		$has_melee_core = true;
+		$summary['attack_bonus_percent'] += 50;
 		$summary['active_effects'][] = '근거리 영웅 4명 이상: 공격력 +50%';
 	}
 	if ($summary['magic_units'] >= 4) {
-		$summary['attack_multiplier'] += 0.5;
+		$has_magic_core = true;
+		$summary['attack_bonus_percent'] += 50;
 		$summary['active_effects'][] = '마법 영웅 4명 이상: 공격력 +50%';
 	}
+	if ($has_melee_core && $has_magic_core) {
+		$overlap_scale = max(0.0, min(1.0, (float)$profile['dual_core_overlap_scale']));
+		$overlap_penalty = max(0, (int)round(50 * (1.0 - $overlap_scale)));
+		if ($overlap_penalty > 0) {
+			$summary['attack_bonus_percent'] = max(0, (int)$summary['attack_bonus_percent'] - $overlap_penalty);
+			$overlap_ratio = (int)round($overlap_scale * 100);
+			$summary['active_effects'][] = "근/마 동시 채용 조정: 중첩 보너스 {$overlap_ratio}% 적용 (-{$overlap_penalty}%)";
+		}
+	}
+	if ($summary['physical_units'] >= 4) {
+		$summary['physical_penetration_percent'] = $profile['physical_penetration_pct'];
+		$summary['active_effects'][] = "물리 타격대: 방어 관통 +{$profile['physical_penetration_pct']}%";
+	}
+	if ($summary['ranged_units'] >= 4) {
+		$summary['first_hit_bonus_percent'] = $profile['first_hit_bonus_pct'];
+		$summary['active_effects'][] = "원거리 포격: 첫 타 피해 +{$profile['first_hit_bonus_pct']}%";
+	}
+	if ($summary['melee_units'] >= 2 && $summary['ranged_units'] >= 2) {
+		$summary['incoming_damage_reduction_percent'] += $profile['balance_damage_reduction_pct'];
+		$summary['active_effects'][] = "균형 진형: 받는 피해 -{$profile['balance_damage_reduction_pct']}%";
+	}
+	if ($summary['physical_units'] >= 2 && $summary['magic_units'] >= 2) {
+		$summary['crit_damage_bonus_percent'] += $profile['mixed_crit_damage_bonus_pct'];
+		$summary['active_effects'][] = "혼합 화력: 치명타 피해 +{$profile['mixed_crit_damage_bonus_pct']}%";
+	}
+	if ($human_units >= 4) {
+		$summary['reward_bonus_percent'] += $profile['reward_bonus_pct'];
+		$summary['active_effects'][] = "인간 연합: 전투 보상 +{$profile['reward_bonus_pct']}%";
+	}
+	if ($animal_units >= 3) {
+		$summary['double_attack_bonus_point'] += $profile['beast_double_attack_pp'];
+		$summary['active_effects'][] = "야수 본능: 연속 공격 확률 +{$profile['beast_double_attack_pp']}%p";
+	}
+	if ($robot_units >= 3) {
+		$summary['shield_percent'] = max($summary['shield_percent'], $profile['machine_shield_pct']);
+		$summary['active_effects'][] = "기계 방진: 턴 시작 보호막 {$profile['machine_shield_pct']}%";
+	}
+	if ($spirit_units >= 3) {
+		$summary['skill_damage_bonus_percent'] += $profile['spirit_skill_damage_pct'];
+		$summary['mp_regen_per_turn'] += $profile['spirit_mp_regen'];
+		$summary['active_effects'][] = "정령 공명: 스킬 피해 +{$profile['spirit_skill_damage_pct']}%, 턴당 MP +{$profile['spirit_mp_regen']}";
+	}
+	if ($demon_units >= 3) {
+		$has_demon_contract = true;
+		$summary['attack_bonus_percent'] += $profile['demon_attack_bonus_pct'];
+		$summary['demon_hp_drain_percent'] = max($summary['demon_hp_drain_percent'], $profile['demon_hp_drain_pct']);
+		$summary['active_effects'][] = "악마 계약: 공격력 +{$profile['demon_attack_bonus_pct']}%, 턴 종료 HP {$profile['demon_hp_drain_pct']}% 소모";
+	}
+	if ($dragon_units >= 1 && $summary['magic_units'] >= 3) {
+		$summary['boss_damage_bonus_percent'] = max($summary['boss_damage_bonus_percent'], $profile['dragon_boss_damage_pct']);
+		$summary['active_effects'][] = "용혈 압도: 보스 대상 피해 +{$profile['dragon_boss_damage_pct']}%";
+	}
+	if ($orc_units >= 2) {
+		$summary['orc_kill_stack_bonus_percent'] = max($summary['orc_kill_stack_bonus_percent'], $profile['orc_kill_stack_bonus_pct']);
+		$summary['orc_kill_stack_max'] = max($summary['orc_kill_stack_max'], $profile['orc_kill_stack_max']);
+		$summary['orc_stack_total_cap_percent'] = max(0, (int)$profile['orc_stack_total_cap_pct']);
+		$summary['active_effects'][] = "오크 광분: 처치 스택 +{$profile['orc_kill_stack_bonus_pct']}% (최대 {$profile['orc_kill_stack_max']}스택, 총합 +{$profile['orc_stack_total_cap_pct']}% 상한)";
+	}
+	if ($summary['distinct_race_count'] >= 4) {
+		$multirace_bonus = (int)$profile['multirace_all_damage_pct'];
+		if ($has_demon_contract) {
+			$demon_link_scale = max(0.0, min(1.0, (float)$profile['demon_multirace_scale']));
+			$scaled_bonus = (int)round($multirace_bonus * $demon_link_scale);
+			if ($scaled_bonus < $multirace_bonus) {
+				$summary['active_effects'][] = "악마 계약 간섭: 다종족 피해 보너스 {$scaled_bonus}%로 조정";
+			}
+			$multirace_bonus = $scaled_bonus;
+		}
+		$summary['global_damage_bonus_percent'] += $multirace_bonus;
+		$summary['incoming_damage_reduction_percent'] += $profile['multirace_damage_reduction_pct'];
+		$summary['active_effects'][] = "다종족 연계: 모든 피해 +{$multirace_bonus}%, 받는 피해 -{$profile['multirace_damage_reduction_pct']}%";
+	}
 
-	$summary['attack_bonus_percent'] = (int)round(($summary['attack_multiplier'] - 1.0) * 100);
+	$first_hit_cap = max(0, (int)$profile['first_hit_cap_pct']);
+	if ((int)$summary['first_hit_bonus_percent'] > $first_hit_cap) {
+		$summary['first_hit_bonus_percent'] = $first_hit_cap;
+	}
+
+	$boss_damage_cap = max(0, (int)$profile['boss_damage_cap_pct']);
+	if ((int)$summary['boss_damage_bonus_percent'] > $boss_damage_cap) {
+		$summary['boss_damage_bonus_percent'] = $boss_damage_cap;
+		$summary['active_effects'][] = "보스 피해 상한 적용: +{$boss_damage_cap}%";
+	}
+
+	$reward_cap = max(0, (int)$profile['reward_bonus_cap_pct']);
+	if ((int)$summary['reward_bonus_percent'] > $reward_cap) {
+		$summary['reward_bonus_percent'] = $reward_cap;
+		$summary['active_effects'][] = "보상 보너스 상한 적용: +{$reward_cap}%";
+	}
+
+	$incoming_cap = max(0, (int)$profile['incoming_reduction_cap_pct']);
+	$summary['incoming_damage_reduction_percent'] = min($incoming_cap, (int)$summary['incoming_damage_reduction_percent']);
+
+	$raw_total_damage = max(0, (int)$summary['attack_bonus_percent'] + (int)$summary['global_damage_bonus_percent']);
+	$summary['raw_total_damage_bonus_percent'] = $raw_total_damage;
+
+	$soft_cap = max(0, (int)$profile['total_damage_softcap_pct']);
+	$hard_cap = max($soft_cap, (int)$profile['total_damage_hardcap_pct']);
+	$overflow_scale = max(0.0, min(1.0, (float)$profile['total_damage_overflow_scale']));
+	$effective_total_damage = (float)$raw_total_damage;
+	if ($effective_total_damage > $soft_cap) {
+		$overflow = $effective_total_damage - $soft_cap;
+		$effective_total_damage = $soft_cap + ($overflow * $overflow_scale);
+	}
+	$effective_total_damage = min($effective_total_damage, $hard_cap);
+	$summary['total_damage_bonus_percent'] = max(0, (int)round($effective_total_damage));
+
+	if ($summary['total_damage_bonus_percent'] < $raw_total_damage) {
+		$summary['active_effects'][] = "피해 상승 상한 적용: +{$raw_total_damage}% → +{$summary['total_damage_bonus_percent']}%";
+	}
+
+	if ($has_demon_contract) {
+		$demon_overload_threshold = max(0, (int)$profile['demon_overload_threshold_pct']);
+		if ($raw_total_damage >= $demon_overload_threshold) {
+			$extra_drain = max(0, (int)$profile['demon_overload_extra_drain_pct']);
+			if ($extra_drain > 0) {
+				$summary['demon_hp_drain_percent'] += $extra_drain;
+				$summary['active_effects'][] = "악마 과부하: HP 소모 +{$extra_drain}% (총 {$summary['demon_hp_drain_percent']}%)";
+			}
+		}
+	}
+
+	$summary['incoming_damage_multiplier'] = max(0.2, 1.0 - ($summary['incoming_damage_reduction_percent'] / 100.0));
+	$summary['skill_damage_multiplier'] = 1.0 + (((int)$summary['skill_damage_bonus_percent']) / 100.0);
+	$summary['attack_multiplier'] = 1.0 + (((int)$summary['attack_bonus_percent']) / 100.0);
+	$summary['all_damage_multiplier'] = 1.0 + ($summary['total_damage_bonus_percent'] / 100.0);
+
 	return $summary;
 }
 
 function render_deck_synergy_html($summary) {
 	$melee = (int)(isset($summary['melee_units']) ? $summary['melee_units'] : 0);
+	$ranged = (int)(isset($summary['ranged_units']) ? $summary['ranged_units'] : 0);
+	$physical = (int)(isset($summary['physical_units']) ? $summary['physical_units'] : 0);
 	$magic = (int)(isset($summary['magic_units']) ? $summary['magic_units'] : 0);
-	$bonus = (int)(isset($summary['attack_bonus_percent']) ? $summary['attack_bonus_percent'] : 0);
+	$bonus = (int)(isset($summary['total_damage_bonus_percent']) ? $summary['total_damage_bonus_percent'] : 0);
+	$raw_bonus = (int)(isset($summary['raw_total_damage_bonus_percent']) ? $summary['raw_total_damage_bonus_percent'] : $bonus);
+	$incoming_reduction = (int)(isset($summary['incoming_damage_reduction_percent']) ? $summary['incoming_damage_reduction_percent'] : 0);
+	$distinct_races = (int)(isset($summary['distinct_race_count']) ? $summary['distinct_race_count'] : 0);
+	$tier = isset($summary['floor_tier']) ? (string)$summary['floor_tier'] : '중반';
+	$range_label = isset($summary['floor_range']) ? (string)$summary['floor_range'] : '41-120';
 	$total = (int)(isset($summary['total_units']) ? $summary['total_units'] : 0);
+	$effects = isset($summary['active_effects']) && is_array($summary['active_effects']) ? $summary['active_effects'] : array();
 
-	$melee_active = ($melee >= 4);
-	$magic_active = ($magic >= 4);
+	$melee_active = ($melee >= 4 || ($melee >= 2 && $ranged >= 2));
+	$magic_active = ($magic >= 4 || ($physical >= 2 && $magic >= 2));
 	$melee_bg = $melee_active ? '#2e7d32' : '#333';
 	$magic_bg = $magic_active ? '#7b1fa2' : '#333';
+	$range_bg = ($ranged >= 4) ? '#1565c0' : '#333';
+	$physical_bg = ($physical >= 4) ? '#8d6e63' : '#333';
 
-	$html = "<div title='출전 덱 시너지: 근거리 4명 이상 공격력 +50%, 마법 영웅 4명 이상 공격력 +50% (중첩 가능)' style='margin:8px 0 10px; padding:10px; background:#1b1b1b; border:1px solid #3b3b3b; border-radius:6px;'>";
+	$html = "<div title='층 구간별 시너지 수치가 자동 반영됩니다.' style='margin:8px 0 10px; padding:10px; background:#1b1b1b; border:1px solid #3b3b3b; border-radius:6px;'>";
 	$html .= "<div style='display:flex; justify-content:space-between; align-items:center; gap:8px;'>";
 	$html .= "<span style='font-size:0.85rem; color:#cfd8dc; font-weight:bold;'>⚙️ 출전 덱 시너지</span>";
-	$html .= "<span style='font-size:0.85rem; color:#ffd54f; font-weight:bold;'>공격력 +{$bonus}%</span>";
+	$html .= "<span style='font-size:0.82rem; color:#90caf9; font-weight:bold;'>{$tier} ({$range_label})</span>";
 	$html .= "</div>";
-	$html .= "<div style='font-size:0.75rem; color:#9e9e9e; margin-top:4px;'>출전 총원: {$total}명</div>";
+	$bonus_text = "+{$bonus}%";
+	if ($raw_bonus > $bonus) {
+		$bonus_text = "+{$bonus}% (원본 +{$raw_bonus}%)";
+	}
+	$html .= "<div style='font-size:0.75rem; color:#9e9e9e; margin-top:4px;'>출전 총원: {$total}명 | 피해 {$bonus_text} | 받피 -{$incoming_reduction}% | 종족 {$distinct_races}종</div>";
 	$html .= "<div style='display:grid; gap:5px; margin-top:8px;'>";
-	$html .= "<div title='근거리 영웅 4명 이상이면 공격력 +50%' style='padding:6px 8px; border-radius:5px; background:{$melee_bg}; color:#fff; font-size:0.78rem;'>근거리 {$melee}/4" . ($melee_active ? " ✅" : "") . "</div>";
-	$html .= "<div title='마법 영웅 4명 이상이면 공격력 +50%' style='padding:6px 8px; border-radius:5px; background:{$magic_bg}; color:#fff; font-size:0.78rem;'>마법 {$magic}/4" . ($magic_active ? " ✅" : "") . "</div>";
+	$html .= "<div style='padding:6px 8px; border-radius:5px; background:{$melee_bg}; color:#fff; font-size:0.78rem;'>근거리 {$melee}명</div>";
+	$html .= "<div style='padding:6px 8px; border-radius:5px; background:{$range_bg}; color:#fff; font-size:0.78rem;'>원거리 {$ranged}명</div>";
+	$html .= "<div style='padding:6px 8px; border-radius:5px; background:{$physical_bg}; color:#fff; font-size:0.78rem;'>물리 {$physical}명</div>";
+	$html .= "<div style='padding:6px 8px; border-radius:5px; background:{$magic_bg}; color:#fff; font-size:0.78rem;'>마법 {$magic}명</div>";
+	if (!empty($effects)) {
+		$html .= "<div style='margin-top:4px; padding:7px 8px; border-radius:5px; background:#262626; color:#e0e0e0; font-size:0.74rem; line-height:1.45;'>";
+		$html .= implode('<br>', array_map('htmlspecialchars', $effects));
+		$html .= "</div>";
+	}
 	$html .= "</div></div>";
 
 	return $html;
@@ -424,21 +818,28 @@ function estimate_expected_turn_damage(PDO $pdo, $uid, $cmd) {
 	$p_luk = (int)$cmd['stat_luk'];
 	$p_men = (int)$cmd['stat_men'];
 	$p_agi = (int)$cmd['stat_agi'];
+	$current_floor = max(1, (int)(isset($cmd['current_floor']) ? $cmd['current_floor'] : 1));
 
 	$crit_chance = min(100, max(0, (int)floor($p_luk / 2)));
 	$crit_chance_rate = $crit_chance / 100.0;
 	$crit_mult = 1.5 + ($p_luk * 0.01);
-	$expected_crit_mult = 1 + ($crit_chance_rate * ($crit_mult - 1));
 	$men_mult = 1 + ($p_men * 0.005);
 	$agi_double_rate = min(100, max(0, (int)floor($p_agi / 5))) / 100.0;
 	$agi_mult = 1 + $agi_double_rate;
 
-	$commander_base = max(1, (int)floor(($p_str * 1.8) + 8));
-	$commander_expected = (float)$commander_base * $expected_crit_mult;
-
 	$deck_stmt = $pdo->prepare("SELECT hero_rank, hero_name, MAX(level) AS level, SUM(quantity) AS equipped_count FROM tb_heroes WHERE uid = ? AND is_equipped = 1 AND quantity > 0 GROUP BY hero_rank, hero_name");
 	$deck_stmt->execute(array($uid));
 	$deck = $deck_stmt->fetchAll();
+	$deck_synergy = build_deck_synergy_summary($deck, true, $current_floor);
+
+	$crit_bonus_pct = (int)(isset($deck_synergy['crit_damage_bonus_percent']) ? $deck_synergy['crit_damage_bonus_percent'] : 0);
+	if ($crit_bonus_pct > 0) {
+		$crit_mult *= (1 + ($crit_bonus_pct / 100.0));
+	}
+	$expected_crit_mult = 1 + ($crit_chance_rate * ($crit_mult - 1));
+
+	$commander_base = max(1, (int)floor(($p_str * 1.8) + 8));
+	$commander_expected = (float)$commander_base * $expected_crit_mult;
 
 	$rank_avg_map = array(
 		'일반' => 7.5,
@@ -458,10 +859,11 @@ function estimate_expected_turn_damage(PDO $pdo, $uid, $cmd) {
 		$heroes_expected += $avg * $hero_count * $men_mult * $expected_crit_mult;
 	}
 
-	$deck_synergy = build_deck_synergy_summary($deck, true);
-	$attack_synergy_mult = (float)$deck_synergy['attack_multiplier'];
+	$all_damage_mult = (float)(isset($deck_synergy['all_damage_multiplier']) ? $deck_synergy['all_damage_multiplier'] : 1.0);
+	$first_hit_bonus_pct = (int)(isset($deck_synergy['first_hit_bonus_percent']) ? $deck_synergy['first_hit_bonus_percent'] : 0);
+	$first_hit_weight = 1 + (($first_hit_bonus_pct / 100.0) * 0.35);
 
-	$expected_turn_damage = ($commander_expected + $heroes_expected) * $agi_mult * $attack_synergy_mult;
+	$expected_turn_damage = ($commander_expected + $heroes_expected) * $agi_mult * $all_damage_mult * $first_hit_weight;
 	return max(10, (int)floor($expected_turn_damage));
 }
 
@@ -680,11 +1082,11 @@ function build_hero_tooltip($hero) {
 	return implode("\n", $lines);
 }
 
-function generate_hero_lists($heroes) {
+function generate_hero_lists($heroes, $current_floor = 1) {
 	$deck_html = '';
 	$inv_html = '';
 	$deck_count = 0;
-	$deck_synergy_html = render_deck_synergy_html(build_deck_synergy_summary($heroes));
+	$deck_synergy_html = render_deck_synergy_html(build_deck_synergy_summary($heroes, false, $current_floor));
 
 	foreach ($heroes as $h) {
 		$color = isset($GLOBALS['colors'][$h['hero_rank']]) ? $GLOBALS['colors'][$h['hero_rank']] : '#fff';
@@ -1230,11 +1632,34 @@ function handle_combat(PDO $pdo) {
 		cleanup_combat_if_stale($pdo, $uid, $cmd);
 		if ((int)$cmd['is_combat'] === 0) { $pdo->commit(); json_error('전투 정보가 정리되었습니다.'); return; }
 
-		if (!isset($_SESSION['combat_state'])) $_SESSION['combat_state'] = array('hero_attack_counts' => array(), 'enemy_debuffs' => array());
+		if (!isset($_SESSION['combat_state']) || !is_array($_SESSION['combat_state'])) {
+			$_SESSION['combat_state'] = array('hero_attack_counts' => array(), 'enemy_debuffs' => array(), 'orc_frenzy_stacks' => 0);
+		}
+		if (!isset($_SESSION['combat_state']['hero_attack_counts']) || !is_array($_SESSION['combat_state']['hero_attack_counts'])) {
+			$_SESSION['combat_state']['hero_attack_counts'] = array();
+		}
+		if (!isset($_SESSION['combat_state']['enemy_debuffs']) || !is_array($_SESSION['combat_state']['enemy_debuffs'])) {
+			$_SESSION['combat_state']['enemy_debuffs'] = array();
+		}
+		if (!isset($_SESSION['combat_state']['orc_frenzy_stacks'])) {
+			$_SESSION['combat_state']['orc_frenzy_stacks'] = 0;
+		}
+		if (!isset($_SESSION['combat_state']['orc_no_kill_turns'])) {
+			$_SESSION['combat_state']['orc_no_kill_turns'] = 0;
+		}
+		if (!isset($_SESSION['orc_frenzy_stacks'])) {
+			$_SESSION['orc_frenzy_stacks'] = 0;
+		}
 
 		$logs = array();
 		$new_mob_hp = (int)$cmd['mob_hp'];
 		$new_hp = (int)$cmd['hp'];
+		$new_mp = (int)$cmd['mp'];
+		$turn_hp_before = $new_hp;
+		$turn_mp_before = $new_mp;
+		$reflect_damage_turn = 0;
+		$player_dmg = 0;
+		$is_crit = false;
 		$incoming_damage = 0;
 		$incoming_damage_source = '';
 		$total_hero_turn_damage = 0;
@@ -1247,9 +1672,42 @@ function handle_combat(PDO $pdo) {
 		$deck_stmt = $pdo->prepare("SELECT hero_rank, hero_name, MAX(level) AS level, SUM(quantity) AS equipped_count FROM tb_heroes WHERE uid = ? AND is_equipped = 1 AND quantity > 0 GROUP BY hero_rank, hero_name");
 		$deck_stmt->execute(array($uid));
 		$deck = $deck_stmt->fetchAll();
-		$deck_synergy = build_deck_synergy_summary($deck, true);
-		$attack_synergy_mult = (float)$deck_synergy['attack_multiplier'];
-		$attack_synergy_bonus_pct = (int)$deck_synergy['attack_bonus_percent'];
+		$current_floor = max(1, (int)$cmd['current_floor']);
+		$deck_synergy = build_deck_synergy_summary($deck, true, $current_floor);
+		$is_boss_mob = (strpos((string)$cmd['mob_name'], '[보스]') !== false);
+
+		$synergy_all_damage_mult = (float)(isset($deck_synergy['all_damage_multiplier']) ? $deck_synergy['all_damage_multiplier'] : 1.0);
+		$synergy_first_hit_bonus_pct = (int)(isset($deck_synergy['first_hit_bonus_percent']) ? $deck_synergy['first_hit_bonus_percent'] : 0);
+		$synergy_physical_pen_pct = (int)(isset($deck_synergy['physical_penetration_percent']) ? $deck_synergy['physical_penetration_percent'] : 0);
+		$synergy_crit_bonus_pct = (int)(isset($deck_synergy['crit_damage_bonus_percent']) ? $deck_synergy['crit_damage_bonus_percent'] : 0);
+		$synergy_reward_bonus_pct = (int)(isset($deck_synergy['reward_bonus_percent']) ? $deck_synergy['reward_bonus_percent'] : 0);
+		$synergy_double_attack_pp = (int)(isset($deck_synergy['double_attack_bonus_point']) ? $deck_synergy['double_attack_bonus_point'] : 0);
+		$synergy_shield_pct = (int)(isset($deck_synergy['shield_percent']) ? $deck_synergy['shield_percent'] : 0);
+		$synergy_mp_regen = (int)(isset($deck_synergy['mp_regen_per_turn']) ? $deck_synergy['mp_regen_per_turn'] : 0);
+		$synergy_demon_hp_drain_pct = (int)(isset($deck_synergy['demon_hp_drain_percent']) ? $deck_synergy['demon_hp_drain_percent'] : 0);
+		$synergy_boss_bonus_pct = (int)(isset($deck_synergy['boss_damage_bonus_percent']) ? $deck_synergy['boss_damage_bonus_percent'] : 0);
+		$synergy_incoming_mult = (float)(isset($deck_synergy['incoming_damage_multiplier']) ? $deck_synergy['incoming_damage_multiplier'] : 1.0);
+		$synergy_orc_stack_pct = (int)(isset($deck_synergy['orc_kill_stack_bonus_percent']) ? $deck_synergy['orc_kill_stack_bonus_percent'] : 0);
+		$synergy_orc_stack_max = (int)(isset($deck_synergy['orc_kill_stack_max']) ? $deck_synergy['orc_kill_stack_max'] : 0);
+		$synergy_orc_stack_total_cap_pct = (int)(isset($deck_synergy['orc_stack_total_cap_percent']) ? $deck_synergy['orc_stack_total_cap_percent'] : 0);
+		if ($synergy_orc_stack_max <= 0 || $synergy_orc_stack_pct <= 0) {
+			reset_orc_frenzy_state();
+		}
+		$orc_stacks = max(0, (int)$_SESSION['orc_frenzy_stacks']);
+		if ($synergy_orc_stack_max > 0) $orc_stacks = min($orc_stacks, $synergy_orc_stack_max);
+		$synergy_orc_stack_total_pct = $orc_stacks * $synergy_orc_stack_pct;
+		if ($synergy_orc_stack_total_cap_pct > 0) {
+			$synergy_orc_stack_total_pct = min($synergy_orc_stack_total_pct, $synergy_orc_stack_total_cap_pct);
+		}
+		$_SESSION['combat_state']['orc_frenzy_stacks'] = $orc_stacks;
+
+		if ($synergy_mp_regen > 0) {
+			$regen_mp = min($synergy_mp_regen, max(0, (int)$cmd['max_mp'] - $new_mp));
+			if ($regen_mp > 0) {
+				$new_mp += $regen_mp;
+				$logs[] = "🔷 <span style='color:#90caf9;'>[정령 공명]</span> 턴 시작 MP +{$regen_mp}";
+			}
+		}
 
 		$p_str = (int)$cmd['stat_str'];
 		$p_mag = (int)$cmd['stat_mag'];
@@ -1268,24 +1726,35 @@ function handle_combat(PDO $pdo) {
 
 		$crit_chance = floor($p_luk / 2);
 		$crit_mult = 1.5 + ($p_luk * 0.01);
+		if ($synergy_crit_bonus_pct > 0) {
+			$crit_mult *= (1 + ($synergy_crit_bonus_pct / 100.0));
+		}
 		$men_mult = 1 + ($p_men * 0.005);
-		$agi_double_chance = floor($p_agi / 5);
+		$agi_double_chance = min(95, floor($p_agi / 5) + $synergy_double_attack_pp);
 		$agi_evasion_chance = min(100, max(0, (int)floor($p_agi / 4)));
 		$vit_block_chance = floor($p_vit / 5);
 		$hero_shield_chance = (count($deck) > 0) ? min(40, (int)floor($p_vit / 10)) : 0;
 		$str_party_bonus_pct = (int)floor($p_str / 10) * 2;
 		$mag_party_bonus_pct = (int)floor($p_mag / 10) * 2;
-		$physical_heroes = array('늑대전사', '배트맨', '블롭', '베인', '닌자', '마스터 쿤', '골라조', '산적', '야만인', '레인저', '보안관', '호랑이사부');
-		$magic_heroes = array('냥법사', '콜디', '펄스생성기', '오크주술사', '중력자탄', '전기로봇', '충격로봇', '물의정령', '샌드맨', '마마', '아토', '와트', '타르');
+
+		if (!empty($deck_synergy['active_effects'])) {
+			$logs[] = "⚙️ <span style='color:#ffd54f;'>시너지 활성 {$deck_synergy['floor_tier']} ({$deck_synergy['floor_range']})</span>";
+		}
 
 		// 공격 버튼 기본 피해는 STR 중심으로 계산
 		$player_base = max(1, (int)floor(($p_str * 1.8) + rand(4, 12)));
 		if ($relic_atk_bonus > 0) $player_base = (int)floor($player_base * (1 + ($relic_atk_bonus / 100)));
 		if ($berserk_bonus_pct > 0) $player_base = (int)floor($player_base * (1 + ($berserk_bonus_pct / 100)));
-		if ($attack_synergy_mult > 1.0) {
-			$player_base = (int)floor($player_base * $attack_synergy_mult);
-			$logs[] = "⚙️ <span style='color:#ffd54f; font-weight:bold;'>[덱 시너지]</span> 공격력 +{$attack_synergy_bonus_pct}% 적용";
+		if ($synergy_first_hit_bonus_pct > 0) {
+			$player_base = (int)floor($player_base * (1 + ($synergy_first_hit_bonus_pct / 100.0)));
+			$logs[] = "🎯 <span style='color:#64b5f6;'>[원거리 포격]</span> 첫 타 피해 +{$synergy_first_hit_bonus_pct}%";
 		}
+		$player_base = (int)floor($player_base * $synergy_all_damage_mult);
+		if ($synergy_physical_pen_pct > 0) $player_base = (int)floor($player_base * (1 + ($synergy_physical_pen_pct / 100.0)));
+		if ($is_boss_mob && $synergy_boss_bonus_pct > 0) $player_base = (int)floor($player_base * (1 + ($synergy_boss_bonus_pct / 100.0)));
+		if ($synergy_orc_stack_total_pct > 0) $player_base = (int)floor($player_base * (1 + ($synergy_orc_stack_total_pct / 100.0)));
+		$player_base = max(1, (int)$player_base);
+
 		$is_crit = (rand(1, 100) <= $crit_chance);
 		$player_dmg = $is_crit ? floor($player_base * $crit_mult) : $player_base;
 		$turn_damage_details[] = array('name' => '사령관', 'damage' => (int)$player_dmg);
@@ -1298,6 +1767,9 @@ function handle_combat(PDO $pdo) {
 			$logs[] = "<div style='margin:5px 0; padding-left:10px; border-left:2px solid #555; color:#aaa; font-size:0.85rem;'>▼ 영웅들이 합세합니다!</div>";
 			foreach ($deck as $hero) {
 				if ($new_mob_hp <= 0) break;
+				$hero_traits = get_hero_traits($hero['hero_name']);
+				$hero_is_physical = ((string)$hero_traits['attack_type'] === '물리');
+				$hero_is_magic = in_array((string)$hero_traits['attack_type'], array('마법', '마법딜러'), true);
 
 				$attack_times = (rand(1, 100) <= $agi_double_chance) ? 2 : 1;
 				for ($i = 0; $i < $attack_times; $i++) {
@@ -1309,18 +1781,19 @@ function handle_combat(PDO $pdo) {
 					$hero_count = max(1, (int)(isset($hero['equipped_count']) ? $hero['equipped_count'] : (isset($hero['quantity']) ? $hero['quantity'] : 1)));
 					$hero_dmg = rand($r[0], $r[1]) * $hero_count;
 					$hero_dmg = (int)floor($hero_dmg * $men_mult);
-					if (in_array($hero['hero_name'], $physical_heroes, true) && $str_party_bonus_pct > 0) {
+					if ($hero_is_physical && $str_party_bonus_pct > 0) {
 						$hero_dmg = (int)floor($hero_dmg * (1 + ($str_party_bonus_pct / 100)));
-					} elseif (in_array($hero['hero_name'], $magic_heroes, true) && $mag_party_bonus_pct > 0) {
+					} elseif ($hero_is_magic && $mag_party_bonus_pct > 0) {
 						$hero_dmg = (int)floor($hero_dmg * (1 + ($mag_party_bonus_pct / 100)));
 					}
-						if ($attack_synergy_mult > 1.0) {
-							$hero_dmg = (int)floor($hero_dmg * $attack_synergy_mult);
-						}
+					$hero_dmg = (int)floor($hero_dmg * $synergy_all_damage_mult);
+					if ($hero_is_physical && $synergy_physical_pen_pct > 0) $hero_dmg = (int)floor($hero_dmg * (1 + ($synergy_physical_pen_pct / 100.0)));
+					if ($is_boss_mob && $synergy_boss_bonus_pct > 0) $hero_dmg = (int)floor($hero_dmg * (1 + ($synergy_boss_bonus_pct / 100.0)));
+					if ($synergy_orc_stack_total_pct > 0) $hero_dmg = (int)floor($hero_dmg * (1 + ($synergy_orc_stack_total_pct / 100.0)));
 
 					$armor_break_flat = isset($_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value']) ? (float)$_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value'] : 0;
 					if ($armor_break_flat > 0) $hero_dmg = (int)floor($hero_dmg * (1 + min(2.0, $armor_break_flat / 100.0)));
-						$hero_dmg = max(1, (int)$hero_dmg);
+					$hero_dmg = max(1, (int)$hero_dmg);
 
 					$is_h_crit = false;
 					if (rand(1, 100) <= floor($p_luk / 2)) { $is_h_crit = true; $hero_dmg = (int)floor($hero_dmg * $crit_mult); }
@@ -1349,16 +1822,34 @@ function handle_combat(PDO $pdo) {
 		}
 
 		$reward_meta = null;
+		$orc_kill_this_turn = false;
 		if ($new_mob_hp <= 0) {
 			$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 쓰러졌습니다!";
+			$orc_kill_this_turn = true;
+			if ($synergy_orc_stack_max > 0) {
+				$next_orc_stack = min($synergy_orc_stack_max, $orc_stacks + 1);
+				if ($next_orc_stack > $orc_stacks) {
+					$_SESSION['orc_frenzy_stacks'] = $next_orc_stack;
+					$_SESSION['combat_state']['orc_frenzy_stacks'] = $next_orc_stack;
+					$_SESSION['combat_state']['orc_no_kill_turns'] = 0;
+					$logs[] = "🪓 <span style='color:#ffcc80;'>[오크 광분]</span> 스택 {$next_orc_stack}/{$synergy_orc_stack_max}";
+				}
+			}
 			$logs[] = "⚡ <span style='color:#ffeb3b; font-weight:bold;'>[선제 제압]</span> 반격 없이 전투를 끝냈습니다!";
 			$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
-			$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => (int)$cmd['mp'])), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp'], (int)$cmd['current_floor']);
-			$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
+			$reward_gold_total = (int)$battle_reward['gold'] + (int)$total_gold_gain;
+			$reward_exp_total = (int)$battle_reward['exp'];
+			if ($synergy_reward_bonus_pct > 0) {
+				$reward_gold_total = (int)floor($reward_gold_total * (1 + ($synergy_reward_bonus_pct / 100.0)));
+				$reward_exp_total = (int)floor($reward_exp_total * (1 + ($synergy_reward_bonus_pct / 100.0)));
+			}
+			$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), $reward_gold_total, $reward_exp_total, (int)$cmd['current_floor']);
+			$logs[] = "🎖️ 전투 보상: <b>{$reward_gold_total}G</b>, 경험치 <b>+{$reward_exp_total}</b>.";
 			foreach ($reward_meta['levelup_logs'] as $levelup_log) {
 				$logs[] = $levelup_log;
 			}
 			$new_hp = (int)$reward_meta['new_hp'];
+			$new_mp = (int)$reward_meta['new_mp'];
 			unset($_SESSION['combat_state']);
 			$status = 'victory';
 		} else {
@@ -1378,30 +1869,63 @@ function handle_combat(PDO $pdo) {
 				$status = 'ongoing';
 			} else {
 				$mob_dmg = max(1, ((int)$cmd['mob_atk'] - floor($p_vit / 2)) * 2);
+				$mob_dmg = max(1, (int)floor($mob_dmg * $synergy_incoming_mult));
+				$shield_left = 0;
+				if ($synergy_shield_pct > 0) {
+					$shield_left = max(1, (int)floor((int)$cmd['max_hp'] * ($synergy_shield_pct / 100.0)));
+					$blocked = min($shield_left, $mob_dmg);
+					$mob_dmg -= $blocked;
+					if ($blocked > 0) {
+						$logs[] = "🧱 <span style='color:#80deea;'>[기계 방진]</span> 보호막이 <b>{$blocked}</b> 피해를 흡수했습니다.";
+					}
+				}
 				$incoming_damage = (int)$mob_dmg;
 				$incoming_damage_source = (string)$cmd['mob_name'];
-				$logs[] = "🩸 <b>{$cmd['mob_name']}</b>의 반격! <span style='color:#ff5252;'>{$mob_dmg}</span> 피해.";
-				$new_hp = max(0, $new_hp - $mob_dmg);
+				if ($mob_dmg > 0) {
+					$logs[] = "🩸 <b>{$cmd['mob_name']}</b>의 반격! <span style='color:#ff5252;'>{$mob_dmg}</span> 피해.";
+					$new_hp = max(0, $new_hp - $mob_dmg);
+				} else {
+					$logs[] = "🛡️ 반격 피해를 모두 흡수했습니다.";
+				}
 
 				$reflect_dmg = max(0, (int)floor(($p_vit * 0.8) + ((int)$cmd['max_hp'] * 0.03)));
 				if ($reflect_dmg > 0) {
+					$reflect_damage_turn += $reflect_dmg;
 					$new_mob_hp = max(0, $new_mob_hp - $reflect_dmg);
 					$logs[] = "🛡️ <span style='color:#8bc34a; font-weight:bold;'>[가시 갑옷]</span> 단단한 방어력으로 <b>{$cmd['mob_name']}</b>에게 <span style='color:#8bc34a;'>{$reflect_dmg}</span> 반사 피해!";
 				}
 
 				if ($new_hp <= 0) {
 					$logs[] = "💀 사령관이 쓰러졌습니다...";
+					reset_orc_frenzy_state();
 					unset($_SESSION['combat_state']);
 					$status = 'defeat';
 				} elseif ($new_mob_hp <= 0) {
 					$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 반사 피해로 쓰러졌습니다!";
+					$orc_kill_this_turn = true;
+					if ($synergy_orc_stack_max > 0) {
+						$next_orc_stack = min($synergy_orc_stack_max, $orc_stacks + 1);
+						if ($next_orc_stack > $orc_stacks) {
+							$_SESSION['orc_frenzy_stacks'] = $next_orc_stack;
+							$_SESSION['combat_state']['orc_frenzy_stacks'] = $next_orc_stack;
+							$_SESSION['combat_state']['orc_no_kill_turns'] = 0;
+							$logs[] = "🪓 <span style='color:#ffcc80;'>[오크 광분]</span> 스택 {$next_orc_stack}/{$synergy_orc_stack_max}";
+						}
+					}
 					$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
-					$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => (int)$cmd['mp'])), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp'], (int)$cmd['current_floor']);
-					$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
+					$reward_gold_total = (int)$battle_reward['gold'] + (int)$total_gold_gain;
+					$reward_exp_total = (int)$battle_reward['exp'];
+					if ($synergy_reward_bonus_pct > 0) {
+						$reward_gold_total = (int)floor($reward_gold_total * (1 + ($synergy_reward_bonus_pct / 100.0)));
+						$reward_exp_total = (int)floor($reward_exp_total * (1 + ($synergy_reward_bonus_pct / 100.0)));
+					}
+					$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), $reward_gold_total, $reward_exp_total, (int)$cmd['current_floor']);
+					$logs[] = "🎖️ 전투 보상: <b>{$reward_gold_total}G</b>, 경험치 <b>+{$reward_exp_total}</b>.";
 					foreach ($reward_meta['levelup_logs'] as $levelup_log) {
 						$logs[] = $levelup_log;
 					}
 					$new_hp = (int)$reward_meta['new_hp'];
+					$new_mp = (int)$reward_meta['new_mp'];
 					unset($_SESSION['combat_state']);
 					$status = 'victory';
 				} else {
@@ -1410,16 +1934,45 @@ function handle_combat(PDO $pdo) {
 			}
 		}
 
+		if ($status === 'ongoing' && $synergy_demon_hp_drain_pct > 0) {
+			$drain = max(1, (int)floor(((int)$cmd['max_hp']) * ($synergy_demon_hp_drain_pct / 100.0)));
+			$new_hp = max(0, $new_hp - $drain);
+			$logs[] = "🩸 <span style='color:#ff8a80;'>[악마 계약]</span> 턴 종료 HP <b>-{$drain}</b>";
+			if ($new_hp <= 0) {
+				$logs[] = "💀 악마의 대가로 사령관이 쓰러졌습니다...";
+				reset_orc_frenzy_state();
+				unset($_SESSION['combat_state']);
+				$status = 'defeat';
+			}
+		}
+
+		if ($status === 'ongoing') {
+			apply_orc_frenzy_decay($logs, $synergy_orc_stack_max, $orc_kill_this_turn);
+			$current_orc_stacks = max(0, (int)(isset($_SESSION['orc_frenzy_stacks']) ? $_SESSION['orc_frenzy_stacks'] : 0));
+			$current_orc_bonus_pct = $current_orc_stacks * $synergy_orc_stack_pct;
+			if ($synergy_orc_stack_total_cap_pct > 0) {
+				$current_orc_bonus_pct = min($current_orc_bonus_pct, $synergy_orc_stack_total_cap_pct);
+			}
+			$turn_outgoing_damage = max(0, (int)$player_dmg + (int)$total_hero_turn_damage + (int)$reflect_damage_turn);
+			$turn_hp_delta = (int)$new_hp - (int)$turn_hp_before;
+			$turn_mp_delta = (int)$new_mp - (int)$turn_mp_before;
+			append_balance_metrics_log($logs, $turn_outgoing_damage, $incoming_damage, $turn_hp_delta, $turn_mp_delta, $synergy_first_hit_bonus_pct, $current_orc_bonus_pct);
+		}
+
+		if ($status === 'defeat') {
+			reset_orc_frenzy_state();
+		}
+
 		if ($reward_meta === null && $total_gold_gain > 0) {
 			$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($total_gold_gain, $uid));
 		}
 
 		if ($status === 'victory' || $status === 'defeat') {
-			$pdo->prepare("UPDATE tb_commanders SET hp = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")
-				->execute(array($new_hp, $uid));
+			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")
+				->execute(array($new_hp, $new_mp, $uid));
 		} else {
 			tick_player_buffs($logs);
-			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mob_hp = ? WHERE uid = ?")->execute(array($new_hp, $new_mob_hp, $uid));
+			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, mob_hp = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $new_mob_hp, $uid));
 		}
 
 		$final_log = implode('<br>', $logs);
@@ -1434,8 +1987,8 @@ function handle_combat(PDO $pdo) {
 			'status' => $status,
 			'stream' => true,
 			'logs' => $logs,
-				'incoming_damage' => $incoming_damage,
-				'incoming_damage_source' => $incoming_damage_source,
+			'incoming_damage' => $incoming_damage,
+			'incoming_damage_source' => $incoming_damage_source,
 			'status_effect_logs' => $status_effect_logs,
 			'turn_damage_details' => $turn_damage_details,
 			'player_dmg' => (int)$player_dmg,
@@ -1446,7 +1999,7 @@ function handle_combat(PDO $pdo) {
 			'max_hit_hero_dmg' => (int)$max_hit_hero_dmg,
 			'new_hp' => $new_hp,
 			'max_hp' => $reward_meta ? (int)$reward_meta['max_hp'] : (int)$cmd['max_hp'],
-			'new_mp' => $reward_meta ? (int)$reward_meta['new_mp'] : (int)$cmd['mp'],
+			'new_mp' => $reward_meta ? (int)$reward_meta['new_mp'] : $new_mp,
 			'max_mp' => $reward_meta ? (int)$reward_meta['max_mp'] : (int)$cmd['max_mp'],
 			'mob_hp' => $new_mob_hp,
 			'mob_max_hp' => (int)$cmd['mob_max_hp'],
@@ -1490,6 +2043,7 @@ function handle_rest(PDO $pdo) {
 		$new_gold = (int)$cmd['gold'] - $cost;
 
 		$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, gold = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $new_gold, $uid));
+		reset_orc_frenzy_state();
 		$log = "🏕️ 휴식을 취했습니다. <span style='color:#4caf50;'>HP 회복</span> / <span style='color:#2196f3;'>MP 회복</span> / <span style='color:#ffd700;'>-{$cost}G</span>";
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
 		$pdo->commit();
@@ -1521,6 +2075,7 @@ function handle_flee(PDO $pdo) {
 		if (rand(1, 100) <= $chance) {
 			$log = "💨 <b>[도주 성공!]</b> {$cmd['mob_name']}에게서 도망쳤습니다.";
 			$pdo->prepare("UPDATE tb_commanders SET is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")->execute(array($uid));
+			reset_orc_frenzy_state();
 			unset($_SESSION['combat_state']);
 			$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $log));
 			$pdo->commit();
@@ -1681,9 +2236,33 @@ function handle_skill(PDO $pdo) {
 		if ((int)$cmd['hp'] <= 0) throw new Exception('사망 상태에서는 스킬을 사용할 수 없습니다.');
 		if (!$is_in_combat && $skill_id !== 'heal') throw new Exception('힐은 비전투 중에도 사용할 수 있지만, 해당 스킬은 전투 중에만 사용 가능합니다.');
 
+		if ($is_in_combat) {
+			if (!isset($_SESSION['combat_state']) || !is_array($_SESSION['combat_state'])) {
+				$_SESSION['combat_state'] = array('hero_attack_counts' => array(), 'enemy_debuffs' => array(), 'orc_frenzy_stacks' => 0);
+			}
+			if (!isset($_SESSION['combat_state']['hero_attack_counts']) || !is_array($_SESSION['combat_state']['hero_attack_counts'])) {
+				$_SESSION['combat_state']['hero_attack_counts'] = array();
+			}
+			if (!isset($_SESSION['combat_state']['enemy_debuffs']) || !is_array($_SESSION['combat_state']['enemy_debuffs'])) {
+				$_SESSION['combat_state']['enemy_debuffs'] = array();
+			}
+			if (!isset($_SESSION['combat_state']['orc_frenzy_stacks'])) {
+				$_SESSION['combat_state']['orc_frenzy_stacks'] = 0;
+			}
+			if (!isset($_SESSION['combat_state']['orc_no_kill_turns'])) {
+				$_SESSION['combat_state']['orc_no_kill_turns'] = 0;
+			}
+			if (!isset($_SESSION['orc_frenzy_stacks'])) {
+				$_SESSION['orc_frenzy_stacks'] = 0;
+			}
+		}
+
 		$new_mp = (int)$cmd['mp'];
 		$new_hp = (int)$cmd['hp'];
 		$new_mob_hp = (int)$cmd['mob_hp'];
+		$turn_hp_before = $new_hp;
+		$turn_mp_before = $new_mp;
+		$turn_damage_dealt = 0;
 		$resource = isset($skill['resource']) ? (string)$skill['resource'] : 'mp';
 		$cost_text = '소모 없음';
 		if ($resource === 'mp') {
@@ -1700,7 +2279,6 @@ function handle_skill(PDO $pdo) {
 		}
 		$logs = array("🔮 <b>[{$skill['name']}]</b> 시전! ({$cost_text})");
 		$mag_amp = 1 + ((int)$cmd['stat_mag'] * 0.01);
-		if ($is_in_combat && !isset($_SESSION['combat_state'])) $_SESSION['combat_state'] = array('hero_attack_counts' => array(), 'enemy_debuffs' => array());
 
 		$p_str = (int)$cmd['stat_str'];
 		$p_mag = (int)$cmd['stat_mag'];
@@ -1711,25 +2289,65 @@ function handle_skill(PDO $pdo) {
 		$newly_applied_buffs = array();
 		$crit_mult = 1.5 + ($p_luk * 0.01);
 		$men_mult = 1 + ($p_men * 0.005);
-		$agi_double_chance = floor($p_agi / 5);
 		$str_party_bonus_pct = (int)floor($p_str / 10) * 2;
 		$mag_party_bonus_pct = (int)floor($p_mag / 10) * 2;
-		$physical_heroes = array('늑대전사', '배트맨', '블롭', '베인', '닌자', '마스터 쿤', '골라조', '산적', '야만인', '레인저', '보안관', '호랑이사부');
-		$magic_heroes = array('냥법사', '콜디', '펄스생성기', '오크주술사', '중력자탄', '전기로봇', '충격로봇', '물의정령', '샌드맨', '마마', '아토', '와트', '타르');
 		$total_gold_gain = 0;
 		$deck = array();
-		$attack_synergy_mult = 1.0;
-		$attack_synergy_bonus_pct = 0;
+		$agi_double_chance = floor($p_agi / 5);
+		$first_hit_pending = true;
+
+		$synergy_all_damage_mult = 1.0;
+		$synergy_first_hit_bonus_pct = 0;
+		$synergy_physical_pen_pct = 0;
+		$synergy_crit_bonus_pct = 0;
+		$synergy_reward_bonus_pct = 0;
+		$synergy_double_attack_pp = 0;
+		$synergy_skill_damage_mult = 1.0;
+		$synergy_mp_regen = 0;
+		$synergy_demon_hp_drain_pct = 0;
+		$synergy_boss_bonus_pct = 0;
+		$synergy_orc_stack_pct = 0;
+		$synergy_orc_total_cap_pct = 0;
+		$orc_synergy_max = 0;
+		$synergy_orc_stack_total_pct = 0;
+		$is_boss_mob = (strpos((string)$cmd['mob_name'], '[보스]') !== false);
 
 		if ($is_in_combat) {
 			$deck_stmt = $pdo->prepare("SELECT hero_rank, hero_name, MAX(level) AS level, SUM(quantity) AS equipped_count FROM tb_heroes WHERE uid = ? AND is_equipped = 1 AND quantity > 0 GROUP BY hero_rank, hero_name");
 			$deck_stmt->execute(array($uid));
 			$deck = $deck_stmt->fetchAll();
-			$deck_synergy = build_deck_synergy_summary($deck, true);
-			$attack_synergy_mult = (float)$deck_synergy['attack_multiplier'];
-			$attack_synergy_bonus_pct = (int)$deck_synergy['attack_bonus_percent'];
-			if ($attack_synergy_bonus_pct > 0) {
-				$logs[] = "⚙️ <span style='color:#ffd54f; font-weight:bold;'>[덱 시너지]</span> 공격력 +{$attack_synergy_bonus_pct}% 적용";
+			$deck_synergy = build_deck_synergy_summary($deck, true, (int)$cmd['current_floor']);
+			$synergy_all_damage_mult = (float)(isset($deck_synergy['all_damage_multiplier']) ? $deck_synergy['all_damage_multiplier'] : 1.0);
+			$synergy_first_hit_bonus_pct = (int)(isset($deck_synergy['first_hit_bonus_percent']) ? $deck_synergy['first_hit_bonus_percent'] : 0);
+			$synergy_physical_pen_pct = (int)(isset($deck_synergy['physical_penetration_percent']) ? $deck_synergy['physical_penetration_percent'] : 0);
+			$synergy_crit_bonus_pct = (int)(isset($deck_synergy['crit_damage_bonus_percent']) ? $deck_synergy['crit_damage_bonus_percent'] : 0);
+			$synergy_reward_bonus_pct = (int)(isset($deck_synergy['reward_bonus_percent']) ? $deck_synergy['reward_bonus_percent'] : 0);
+			$synergy_double_attack_pp = (int)(isset($deck_synergy['double_attack_bonus_point']) ? $deck_synergy['double_attack_bonus_point'] : 0);
+			$synergy_skill_damage_mult = (float)(isset($deck_synergy['skill_damage_multiplier']) ? $deck_synergy['skill_damage_multiplier'] : 1.0);
+			$synergy_mp_regen = (int)(isset($deck_synergy['mp_regen_per_turn']) ? $deck_synergy['mp_regen_per_turn'] : 0);
+			$synergy_demon_hp_drain_pct = (int)(isset($deck_synergy['demon_hp_drain_percent']) ? $deck_synergy['demon_hp_drain_percent'] : 0);
+			$synergy_boss_bonus_pct = (int)(isset($deck_synergy['boss_damage_bonus_percent']) ? $deck_synergy['boss_damage_bonus_percent'] : 0);
+			$synergy_orc_stack_pct = (int)(isset($deck_synergy['orc_kill_stack_bonus_percent']) ? $deck_synergy['orc_kill_stack_bonus_percent'] : 0);
+			$orc_synergy_max = (int)(isset($deck_synergy['orc_kill_stack_max']) ? $deck_synergy['orc_kill_stack_max'] : 0);
+			$synergy_orc_total_cap_pct = (int)(isset($deck_synergy['orc_stack_total_cap_percent']) ? $deck_synergy['orc_stack_total_cap_percent'] : 0);
+			if ($orc_synergy_max <= 0 || $synergy_orc_stack_pct <= 0) {
+				reset_orc_frenzy_state();
+			}
+			$orc_stacks = max(0, (int)$_SESSION['orc_frenzy_stacks']);
+			$orc_max = (int)(isset($deck_synergy['orc_kill_stack_max']) ? $deck_synergy['orc_kill_stack_max'] : 0);
+			if ($orc_max > 0) $orc_stacks = min($orc_stacks, $orc_max);
+			$synergy_orc_stack_total_pct = $orc_stacks * $synergy_orc_stack_pct;
+			if ($synergy_orc_total_cap_pct > 0) {
+				$synergy_orc_stack_total_pct = min($synergy_orc_stack_total_pct, $synergy_orc_total_cap_pct);
+			}
+			$_SESSION['combat_state']['orc_frenzy_stacks'] = $orc_stacks;
+
+			$agi_double_chance = min(95, $agi_double_chance + $synergy_double_attack_pp);
+			if ($synergy_crit_bonus_pct > 0) {
+				$crit_mult *= (1 + ($synergy_crit_bonus_pct / 100.0));
+			}
+			if (!empty($deck_synergy['active_effects'])) {
+				$logs[] = "⚙️ <span style='color:#ffd54f;'>시너지 활성 {$deck_synergy['floor_tier']} ({$deck_synergy['floor_range']})</span>";
 			}
 		}
 
@@ -1737,8 +2355,18 @@ function handle_skill(PDO $pdo) {
 			if (!$is_in_combat) throw new Exception('해당 스킬은 전투 중에만 사용 가능합니다.');
 			$damage = (int)floor(((int)$skill['value'] + floor((int)$cmd['stat_mag'] * 1.5)) * $mag_amp);
 			if ($berserk_bonus_pct > 0) $damage = (int)floor($damage * (1 + ($berserk_bonus_pct / 100)));
-			if ($attack_synergy_mult > 1.0) $damage = (int)floor($damage * $attack_synergy_mult);
+			if ($synergy_first_hit_bonus_pct > 0) {
+				$damage = (int)floor($damage * (1 + ($synergy_first_hit_bonus_pct / 100.0)));
+				$logs[] = "🎯 <span style='color:#64b5f6;'>[원거리 포격]</span> 첫 타 피해 +{$synergy_first_hit_bonus_pct}%";
+			}
+			$first_hit_pending = false;
+			$damage = (int)floor($damage * $synergy_all_damage_mult);
+			$damage = (int)floor($damage * $synergy_skill_damage_mult);
+			if ($is_boss_mob && $synergy_boss_bonus_pct > 0) $damage = (int)floor($damage * (1 + ($synergy_boss_bonus_pct / 100.0)));
+			if ($synergy_orc_stack_total_pct > 0) $damage = (int)floor($damage * (1 + ($synergy_orc_stack_total_pct / 100.0)));
+			$damage = max(1, (int)$damage);
 			$new_mob_hp = max(0, $new_mob_hp - $damage);
+			$turn_damage_dealt += (int)$damage;
 			$logs[] = "💥 몬스터에게 <span style='color:red;'>{$damage}</span> 피해.";
 		} elseif ($skill['type'] === 'heal') {
 			$heal = (int)floor(((int)$skill['value'] + floor((int)$cmd['stat_men'] * 2) + floor((int)$cmd['stat_mag'] * 0.8)) * (1 + ((int)$cmd['stat_mag'] * 0.005)));
@@ -1764,6 +2392,9 @@ function handle_skill(PDO $pdo) {
 				$logs[] = "<div style='margin:5px 0; padding-left:10px; border-left:2px solid #555; color:#aaa; font-size:0.85rem;'>▼ 영웅들이 마법에 호응해 합세합니다!</div>";
 				foreach ($deck as $hero) {
 					if ($new_mob_hp <= 0) break;
+					$hero_traits = get_hero_traits($hero['hero_name']);
+					$hero_is_physical = ((string)$hero_traits['attack_type'] === '물리');
+					$hero_is_magic = in_array((string)$hero_traits['attack_type'], array('마법', '마법딜러'), true);
 
 					$attack_times = (rand(1, 100) <= $agi_double_chance) ? 2 : 1;
 					for ($i = 0; $i < $attack_times; $i++) {
@@ -1775,14 +2406,20 @@ function handle_skill(PDO $pdo) {
 						$hero_count = max(1, (int)(isset($hero['equipped_count']) ? $hero['equipped_count'] : (isset($hero['quantity']) ? $hero['quantity'] : 1)));
 						$hero_dmg = rand($r[0], $r[1]) * $hero_count;
 						$hero_dmg = (int)floor($hero_dmg * $men_mult);
-						if (in_array($hero['hero_name'], $physical_heroes, true) && $str_party_bonus_pct > 0) {
+						if ($hero_is_physical && $str_party_bonus_pct > 0) {
 							$hero_dmg = (int)floor($hero_dmg * (1 + ($str_party_bonus_pct / 100)));
-						} elseif (in_array($hero['hero_name'], $magic_heroes, true) && $mag_party_bonus_pct > 0) {
+						} elseif ($hero_is_magic && $mag_party_bonus_pct > 0) {
 							$hero_dmg = (int)floor($hero_dmg * (1 + ($mag_party_bonus_pct / 100)));
 						}
-						if ($attack_synergy_mult > 1.0) {
-							$hero_dmg = (int)floor($hero_dmg * $attack_synergy_mult);
+						if ($first_hit_pending && $synergy_first_hit_bonus_pct > 0) {
+							$hero_dmg = (int)floor($hero_dmg * (1 + ($synergy_first_hit_bonus_pct / 100.0)));
+							$first_hit_pending = false;
+							$logs[] = "🎯 <span style='color:#64b5f6;'>[원거리 포격]</span> 첫 타 피해 +{$synergy_first_hit_bonus_pct}%";
 						}
+						$hero_dmg = (int)floor($hero_dmg * $synergy_all_damage_mult);
+						if ($hero_is_physical && $synergy_physical_pen_pct > 0) $hero_dmg = (int)floor($hero_dmg * (1 + ($synergy_physical_pen_pct / 100.0)));
+						if ($is_boss_mob && $synergy_boss_bonus_pct > 0) $hero_dmg = (int)floor($hero_dmg * (1 + ($synergy_boss_bonus_pct / 100.0)));
+						if ($synergy_orc_stack_total_pct > 0) $hero_dmg = (int)floor($hero_dmg * (1 + ($synergy_orc_stack_total_pct / 100.0)));
 
 						$armor_break_flat = isset($_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value']) ? (float)$_SESSION['combat_state']['enemy_debuffs']['armor_break_flat']['value'] : 0;
 						if ($armor_break_flat > 0) $hero_dmg = (int)floor($hero_dmg * (1 + min(2.0, $armor_break_flat / 100.0)));
@@ -1795,6 +2432,7 @@ function handle_skill(PDO $pdo) {
 
 						$hcrit = $is_h_crit ? "⚡ <span style='color:yellow; font-weight:bold;'>[치명타]</span> " : "⚔️ ";
 						$logs[] = "{$hcrit}<span style='color:{$r[2]}'>[{$hero['hero_name']}]</span>(x{$hero_count})의 공격. {$hero_dmg} 피해.";
+						$turn_damage_dealt += (int)$hero_dmg;
 						$new_mob_hp = max(0, $new_mob_hp - $hero_dmg);
 					}
 				}
@@ -1802,16 +2440,43 @@ function handle_skill(PDO $pdo) {
 		}
 
 		$reward_meta = null;
+		$orc_kill_this_turn = false;
 		if ($is_in_combat) {
+			if ($synergy_mp_regen > 0) {
+				$regen_mp = min($synergy_mp_regen, max(0, (int)$cmd['max_mp'] - $new_mp));
+				if ($regen_mp > 0) {
+					$new_mp += $regen_mp;
+					$logs[] = "🔷 <span style='color:#90caf9;'>[정령 공명]</span> 턴 종료 MP +{$regen_mp}";
+				}
+			}
+
 			if ($total_gold_gain > 0 && $new_mob_hp > 0) {
 				$pdo->prepare("UPDATE tb_commanders SET gold = gold + ? WHERE uid = ?")->execute(array($total_gold_gain, $uid));
 			}
 
 			if ($new_mob_hp <= 0) {
 				$logs[] = "🏆 <b>{$cmd['mob_name']}</b>(이)가 쓰러졌습니다!";
+				$orc_kill_this_turn = true;
+				$orc_gain_max = (int)(isset($deck_synergy['orc_kill_stack_max']) ? $deck_synergy['orc_kill_stack_max'] : 0);
+				if ($orc_gain_max > 0) {
+					$next_orc_stack = min($orc_gain_max, max(0, (int)$_SESSION['orc_frenzy_stacks']) + 1);
+					$_SESSION['orc_frenzy_stacks'] = $next_orc_stack;
+					$_SESSION['combat_state']['orc_frenzy_stacks'] = $next_orc_stack;
+					$_SESSION['combat_state']['orc_no_kill_turns'] = 0;
+					$logs[] = "🪓 <span style='color:#ffcc80;'>[오크 광분]</span> 스택 {$next_orc_stack}/{$orc_gain_max}";
+				}
+				$turn_hp_delta = (int)$new_hp - (int)$turn_hp_before;
+				$turn_mp_delta = (int)$new_mp - (int)$turn_mp_before;
+				append_balance_metrics_log($logs, $turn_damage_dealt, 0, $turn_hp_delta, $turn_mp_delta, $synergy_first_hit_bonus_pct, $synergy_orc_stack_total_pct);
 				$battle_reward = get_battle_reward_bundle((int)$cmd['current_floor'], (string)$cmd['mob_name']);
-				$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), (int)$battle_reward['gold'] + (int)$total_gold_gain, (int)$battle_reward['exp'], (int)$cmd['current_floor']);
-				$logs[] = "🎖️ 전투 보상: <b>" . ((int)$battle_reward['gold'] + (int)$total_gold_gain) . "G</b>, 경험치 <b>+{$battle_reward['exp']}</b>.";
+				$reward_gold_total = (int)$battle_reward['gold'] + (int)$total_gold_gain;
+				$reward_exp_total = (int)$battle_reward['exp'];
+				if ($synergy_reward_bonus_pct > 0) {
+					$reward_gold_total = (int)floor($reward_gold_total * (1 + ($synergy_reward_bonus_pct / 100.0)));
+					$reward_exp_total = (int)floor($reward_exp_total * (1 + ($synergy_reward_bonus_pct / 100.0)));
+				}
+				$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), $reward_gold_total, $reward_exp_total, (int)$cmd['current_floor']);
+				$logs[] = "🎖️ 전투 보상: <b>{$reward_gold_total}G</b>, 경험치 <b>+{$reward_exp_total}</b>.";
 				foreach ($reward_meta['levelup_logs'] as $levelup_log) {
 					$logs[] = $levelup_log;
 				}
@@ -1822,11 +2487,38 @@ function handle_skill(PDO $pdo) {
 					->execute(array($new_hp, $new_mp, $uid));
 				$new_mob_hp = 0;
 			} else {
-				tick_player_buffs($logs, $newly_applied_buffs);
-				$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, mob_hp = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $new_mob_hp, $uid));
+				if ($synergy_demon_hp_drain_pct > 0) {
+					$drain = max(1, (int)floor(((int)$cmd['max_hp']) * ($synergy_demon_hp_drain_pct / 100.0)));
+					$new_hp = max(0, $new_hp - $drain);
+					$logs[] = "🩸 <span style='color:#ff8a80;'>[악마 계약]</span> 턴 종료 HP <b>-{$drain}</b>";
+				}
+
+				if ($new_hp <= 0) {
+					$logs[] = "💀 악마의 대가로 사령관이 쓰러졌습니다...";
+					reset_orc_frenzy_state();
+					unset($_SESSION['combat_state']);
+					$pdo->prepare("UPDATE tb_commanders SET hp = 0, mp = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")
+						->execute(array($new_mp, $uid));
+				} else {
+					apply_orc_frenzy_decay($logs, $orc_synergy_max, $orc_kill_this_turn);
+					$current_orc_stacks = max(0, (int)(isset($_SESSION['orc_frenzy_stacks']) ? $_SESSION['orc_frenzy_stacks'] : 0));
+					$current_orc_bonus_pct = $current_orc_stacks * $synergy_orc_stack_pct;
+					if ($synergy_orc_total_cap_pct > 0) {
+						$current_orc_bonus_pct = min($current_orc_bonus_pct, $synergy_orc_total_cap_pct);
+					}
+					$turn_hp_delta = (int)$new_hp - (int)$turn_hp_before;
+					$turn_mp_delta = (int)$new_mp - (int)$turn_mp_before;
+					append_balance_metrics_log($logs, $turn_damage_dealt, 0, $turn_hp_delta, $turn_mp_delta, $synergy_first_hit_bonus_pct, $current_orc_bonus_pct);
+					tick_player_buffs($logs, $newly_applied_buffs);
+					$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, mob_hp = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $new_mob_hp, $uid));
+				}
 			}
 		} else {
 			$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ? WHERE uid = ?")->execute(array($new_hp, $new_mp, $uid));
+		}
+
+		if ($new_hp <= 0) {
+			reset_orc_frenzy_state();
 		}
 		$pdo->commit();
 		echo json_encode(array(
@@ -1918,7 +2610,7 @@ function handle_summon(PDO $pdo) {
 	$summon_cost = 100;
 	try {
 		$pdo->beginTransaction();
-		$st = $pdo->prepare("SELECT gold, stat_luk FROM tb_commanders WHERE uid = ? FOR UPDATE");
+		$st = $pdo->prepare("SELECT gold, stat_luk, current_floor FROM tb_commanders WHERE uid = ? FOR UPDATE");
 		$st->execute(array($uid));
 		$cmd = $st->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
@@ -1975,7 +2667,7 @@ function handle_summon(PDO $pdo) {
 		$all = $pdo->prepare("SELECT * FROM tb_heroes WHERE uid = ? AND quantity > 0 ORDER BY is_equipped DESC, hero_rank DESC, hero_name ASC");
 		$all->execute(array($uid));
 		$heroes = $all->fetchAll();
-		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes);
+		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes, (int)$cmd['current_floor']);
 
 		$gold_st = $pdo->prepare("SELECT gold FROM tb_commanders WHERE uid = ?");
 		$gold_st->execute(array($uid));
@@ -2033,11 +2725,13 @@ function handle_synthesize(PDO $pdo) {
 		$all = $pdo->prepare("SELECT * FROM tb_heroes WHERE uid = ? AND quantity > 0 ORDER BY is_equipped DESC, hero_rank DESC, hero_name ASC");
 		$all->execute(array($uid));
 		$heroes = $all->fetchAll();
-		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes);
+		$current_floor_st = $pdo->prepare("SELECT current_floor, gold FROM tb_commanders WHERE uid = ?");
+		$current_floor_st->execute(array($uid));
+		$cmd_state = $current_floor_st->fetch();
+		$current_floor = (int)(isset($cmd_state['current_floor']) ? $cmd_state['current_floor'] : 1);
+		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes, $current_floor);
 
-		$gold_st = $pdo->prepare("SELECT gold FROM tb_commanders WHERE uid = ?");
-		$gold_st->execute(array($uid));
-		$current_gold = (int)$gold_st->fetchColumn();
+		$current_gold = (int)(isset($cmd_state['gold']) ? $cmd_state['gold'] : 0);
 
 		$msg = "🧬 <b>{$hero_name}</b> 3마리를 합성하여 <span style='color:#ffeb3b; font-weight:bold;'>[{$next_rank}] {$new_hero_name}</span> 획득! <span style='color:#80cbc4;'>[대기 상태 지급]</span>";
 		$trace_msg = "🧬 합성 완료: {$hero_name} x3 -> [{$next_rank}] {$new_hero_name} (대기 상태 지급)";
@@ -2249,7 +2943,10 @@ function handle_equip(PDO $pdo) {
 		$all = $pdo->prepare("SELECT * FROM tb_heroes WHERE uid = ? AND quantity > 0 ORDER BY is_equipped DESC, hero_rank DESC, hero_name ASC");
 		$all->execute(array($uid));
 		$heroes = $all->fetchAll();
-		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes);
+		$floor_stmt = $pdo->prepare("SELECT current_floor FROM tb_commanders WHERE uid = ?");
+		$floor_stmt->execute(array($uid));
+		$current_floor = (int)$floor_stmt->fetchColumn();
+		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes, max(1, $current_floor));
 
 		$pdo->commit();
 		echo json_encode(array('status' => 'success', 'deck_html' => $deck_html, 'inv_html' => $inv_html, 'deck_count' => $deck_count, 'deck_synergy_html' => $deck_synergy_html));
