@@ -1304,7 +1304,6 @@ function apply_commander_rewards(PDO $pdo, $uid, $cmd_state, $gold_gain, $exp_ga
 	);
 }
 
-<<<<<<< HEAD
 function get_equipment_grade_tier($grade) {
 	$map = array('일반' => 1, '희귀' => 2, '영웅' => 3, '전설' => 4, '신화' => 5);
 	$g = trim((string)$grade);
@@ -1504,8 +1503,6 @@ function build_equipment_base_pool() {
 	return $pool;
 }
 
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 function get_item_system_catalog() {
 	static $catalog = null;
 	if ($catalog !== null) return $catalog;
@@ -1561,7 +1558,6 @@ function get_item_system_catalog() {
 				'shop_buyable' => false
 			)
 		),
-<<<<<<< HEAD
 		'equipment_bases' => build_equipment_base_pool(),
 		'equipment_prefixes' => array(
 			array('name' => '맹렬한', 'ranges' => array('attack_pct' => array(4, 8)), 'stats' => array('crit_damage_pct' => 5)),
@@ -1579,31 +1575,6 @@ function get_item_system_catalog() {
 		),
 		'grade_order' => array('일반' => 1, '희귀' => 2, '영웅' => 3, '전설' => 4, '신화' => 5),
 		'synthesis_chain' => array('일반' => '희귀', '희귀' => '영웅', '영웅' => '전설', '전설' => '신화')
-=======
-		'equipment_bases' => array(
-			array('code' => 'eq_iron_sword', 'name' => '철검', 'slot' => 'weapon', 'grade' => '일반', 'stats' => array('attack_pct' => 6)),
-			array('code' => 'eq_leather_armor', 'name' => '가죽 갑옷', 'slot' => 'armor', 'grade' => '일반', 'stats' => array('damage_reduction_pct' => 4)),
-			array('code' => 'eq_bronze_ring', 'name' => '청동 반지', 'slot' => 'accessory', 'grade' => '일반', 'stats' => array('crit_chance' => 3)),
-			array('code' => 'eq_knight_blade', 'name' => '기사검', 'slot' => 'weapon', 'grade' => '희귀', 'stats' => array('attack_pct' => 10)),
-			array('code' => 'eq_guardian_armor', 'name' => '수호자 갑옷', 'slot' => 'armor', 'grade' => '희귀', 'stats' => array('damage_reduction_pct' => 8)),
-			array('code' => 'eq_eagle_pendant', 'name' => '독수리 펜던트', 'slot' => 'accessory', 'grade' => '희귀', 'stats' => array('crit_chance' => 6)),
-			array('code' => 'eq_dragonslayer', 'name' => '용살검', 'slot' => 'weapon', 'grade' => '영웅', 'stats' => array('attack_pct' => 15)),
-			array('code' => 'eq_titan_plate', 'name' => '타이탄 플레이트', 'slot' => 'armor', 'grade' => '영웅', 'stats' => array('damage_reduction_pct' => 12)),
-			array('code' => 'eq_storm_amulet', 'name' => '폭풍 부적', 'slot' => 'accessory', 'grade' => '영웅', 'stats' => array('crit_chance' => 10, 'double_attack_bonus' => 5)),
-			array('code' => 'eq_ancient_relic_blade', 'name' => '고대 유물 검', 'slot' => 'weapon', 'grade' => '전설', 'stats' => array('attack_pct' => 22, 'lifesteal_pct' => 1)),
-			array('code' => 'eq_immortal_armor', 'name' => '불멸의 갑주', 'slot' => 'armor', 'grade' => '전설', 'stats' => array('damage_reduction_pct' => 17)),
-			array('code' => 'eq_fate_necklace', 'name' => '운명의 목걸이', 'slot' => 'accessory', 'grade' => '전설', 'stats' => array('crit_chance' => 14, 'double_attack_bonus' => 8))
-		),
-		'equipment_prefixes' => array(
-			array('name' => '흡혈의', 'stats' => array('lifesteal_pct' => 1)),
-			array('name' => '신속의', 'stats' => array('double_attack_bonus' => 6)),
-			array('name' => '강인한', 'stats' => array('damage_reduction_pct' => 3)),
-			array('name' => '집중의', 'stats' => array('crit_chance' => 4)),
-			array('name' => '맹렬한', 'stats' => array('attack_pct' => 4))
-		),
-		'grade_order' => array('일반' => 1, '희귀' => 2, '영웅' => 3, '전설' => 4, '신화' => 5),
-		'synthesis_chain' => array('일반' => '희귀', '희귀' => '영웅', '영웅' => '전설')
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 	);
 
 	return $catalog;
@@ -1624,7 +1595,6 @@ function merge_item_stats($base_stats, $extra_stats) {
 	return $out;
 }
 
-<<<<<<< HEAD
 function roll_equipment_prefix_stats($prefix_def) {
 	if (!is_array($prefix_def)) return array();
 	$out = array();
@@ -1648,8 +1618,6 @@ function roll_equipment_prefix_stats($prefix_def) {
 	return $out;
 }
 
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 function decode_item_stats($stats_json) {
 	if ($stats_json === null || $stats_json === '') return array();
 	$decoded = json_decode((string)$stats_json, true);
@@ -1668,7 +1636,6 @@ function get_item_effect_text($stats) {
 	if (!empty($stats['attack_pct'])) $parts[] = '공격력 +' . (int)$stats['attack_pct'] . '%';
 	if (!empty($stats['damage_reduction_pct'])) $parts[] = '받는 피해 -' . (int)$stats['damage_reduction_pct'] . '%';
 	if (!empty($stats['crit_chance'])) $parts[] = '치명타 확률 +' . (int)$stats['crit_chance'] . '%';
-<<<<<<< HEAD
 	if (!empty($stats['crit_damage_pct'])) $parts[] = '치명타 피해 +' . (int)$stats['crit_damage_pct'] . '%';
 	if (!empty($stats['double_attack_bonus'])) $parts[] = '연속 공격 +' . (int)$stats['double_attack_bonus'] . '%p';
 	if (!empty($stats['lifesteal_pct'])) $parts[] = '타격 시 HP 흡수 ' . (int)$stats['lifesteal_pct'] . '%';
@@ -1687,10 +1654,6 @@ function get_item_effect_text($stats) {
 	if (!empty($stats['gold_bonus_pct'])) $parts[] = '골드 획득 +' . (int)$stats['gold_bonus_pct'] . '%';
 	if (!empty($stats['magic_damage_pct'])) $parts[] = '마법 피해 +' . (int)$stats['magic_damage_pct'] . '%';
 	if (!empty($stats['incoming_damage_amp_pct'])) $parts[] = '받는 피해 +' . (int)$stats['incoming_damage_amp_pct'] . '%';
-=======
-	if (!empty($stats['double_attack_bonus'])) $parts[] = '연속 공격 +' . (int)$stats['double_attack_bonus'] . '%p';
-	if (!empty($stats['lifesteal_pct'])) $parts[] = '타격 시 HP 흡수 ' . (int)$stats['lifesteal_pct'] . '%';
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 	if (!empty($stats['poison_damage_pct'])) $parts[] = '중독 계열 피해 +' . (int)$stats['poison_damage_pct'] . '%';
 	if (!empty($stats['trap_evade_bonus_pct'])) $parts[] = '함정 회피 +' . (int)$stats['trap_evade_bonus_pct'] . '%';
 	if (!empty($stats['battle_gold_bonus_pct'])) $parts[] = '전투 골드 +' . (int)$stats['battle_gold_bonus_pct'] . '%';
@@ -1698,7 +1661,6 @@ function get_item_effect_text($stats) {
 	return implode(', ', $parts);
 }
 
-<<<<<<< HEAD
 function get_equipment_slot_keys() {
 	return array('오른손', '왼손', '머리', '어깨', '몸통', '팔', '다리', '신발', '망또', '목걸이', '반지1', '반지2', '반지3', '반지4', '반지5');
 }
@@ -1823,11 +1785,6 @@ function get_slot_label($slot) {
 		'반지5' => '반지5'
 	);
 	return $map[$normalized] ?? $normalized;
-=======
-function get_slot_label($slot) {
-	$map = array('weapon' => '무기', 'armor' => '방어구', 'accessory' => '장신구');
-	return isset($map[$slot]) ? $map[$slot] : '기타';
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 }
 
 function get_user_artifact_codes(PDO $pdo, $uid) {
@@ -1864,29 +1821,15 @@ function get_user_artifact_effects(PDO $pdo, $uid) {
 function get_user_equipment_effects(PDO $pdo, $uid) {
 	$st = $pdo->prepare("SELECT stats_json FROM tb_items WHERE uid = ? AND category = 'equipment' AND is_equipped = 1");
 	$st->execute(array($uid));
-<<<<<<< HEAD
 	$effects = array();
 	foreach (get_equipment_comparison_stat_keys() as $k => $_label) {
 		$effects[$k] = 0;
 	}
-=======
-	$effects = array(
-		'attack_pct' => 0,
-		'damage_reduction_pct' => 0,
-		'crit_chance' => 0,
-		'double_attack_bonus' => 0,
-		'lifesteal_pct' => 0
-	);
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 	foreach ($st->fetchAll() as $row) {
 		$stats = decode_item_stats(isset($row['stats_json']) ? $row['stats_json'] : '');
 		foreach ($effects as $k => $_v) {
 			if (isset($stats[$k]) && is_numeric($stats[$k])) {
-<<<<<<< HEAD
 				$effects[$k] += (float)$stats[$k];
-=======
-				$effects[$k] += (int)$stats[$k];
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 			}
 		}
 	}
@@ -1898,7 +1841,6 @@ function get_equipment_comparison_stat_keys() {
 		'attack_pct' => '공격력',
 		'damage_reduction_pct' => '받는 피해 감소',
 		'crit_chance' => '치명타 확률',
-<<<<<<< HEAD
 		'crit_damage_pct' => '치명타 피해',
 		'double_attack_bonus' => '연속 공격',
 		'lifesteal_pct' => '흡혈',
@@ -1917,21 +1859,14 @@ function get_equipment_comparison_stat_keys() {
 		'gold_bonus_pct' => '골드 획득량',
 		'magic_damage_pct' => '마법 피해',
 		'incoming_damage_amp_pct' => '받는 피해 증가'
-=======
-		'double_attack_bonus' => '연속 공격',
-		'lifesteal_pct' => '흡혈'
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 	);
 }
 
 function format_equipment_stat_value($stat_key, $value) {
 	$int_v = (int)round((float)$value);
-<<<<<<< HEAD
 	if (in_array($stat_key, array('str_flat', 'agi_flat', 'luk_flat', 'men_flat', 'vit_flat', 'mana_regen_flat'), true)) {
 		return (string)$int_v;
 	}
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 	$suffix = ($stat_key === 'double_attack_bonus') ? '%p' : '%';
 	if ($stat_key === 'lifesteal_pct') {
 		return $int_v . '%';
@@ -2008,19 +1943,12 @@ function roll_equipment_by_grade($target_grade = '', $floor = 1) {
 	$target = trim((string)$target_grade);
 
 	$grade_roll = array('일반' => 65, '희귀' => 25, '영웅' => 8, '전설' => 2);
-<<<<<<< HEAD
 	if ((int)$floor >= 120) {
 		$grade_roll = array('일반' => 28, '희귀' => 30, '영웅' => 22, '전설' => 14, '신화' => 6);
 	} elseif ((int)$floor >= 80) {
 		$grade_roll = array('일반' => 42, '희귀' => 31, '영웅' => 17, '전설' => 8, '신화' => 2);
 	} elseif ((int)$floor >= 40) {
 		$grade_roll = array('일반' => 53, '희귀' => 30, '영웅' => 11, '전설' => 5, '신화' => 1);
-=======
-	if ((int)$floor >= 80) {
-		$grade_roll = array('일반' => 45, '희귀' => 32, '영웅' => 16, '전설' => 7);
-	} elseif ((int)$floor >= 40) {
-		$grade_roll = array('일반' => 55, '희귀' => 30, '영웅' => 11, '전설' => 4);
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 	}
 
 	if ($target === '') {
@@ -2056,11 +1984,7 @@ function roll_equipment_by_grade($target_grade = '', $floor = 1) {
 	$stats = isset($base['stats']) && is_array($base['stats']) ? $base['stats'] : array();
 	$prefix_name = null;
 	if ($prefix) {
-<<<<<<< HEAD
 		$stats = merge_item_stats($stats, roll_equipment_prefix_stats($prefix));
-=======
-		$stats = merge_item_stats($stats, isset($prefix['stats']) ? $prefix['stats'] : array());
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 		$prefix_name = isset($prefix['name']) ? (string)$prefix['name'] : null;
 	}
 
@@ -2285,7 +2209,6 @@ function render_item_bag_html(PDO $pdo, $uid, $gold) {
 	$consumables = $catalog['consumables'];
 	$grade_order = $catalog['grade_order'];
 
-<<<<<<< HEAD
 	$slot_keys = get_equipment_slot_keys();
 
 	$artifact_items = [];
@@ -2313,33 +2236,10 @@ function render_item_bag_html(PDO $pdo, $uid, $gold) {
 		$gb = $grade_order[$b['item_grade']] ?? 0;
 		if ($ga !== $gb) return $gb - $ga;
 		return $b['item_id'] - $a['item_id'];
-=======
-	$artifact_by_code = array();
-	$consumable_by_code = array();
-	$equipment_rows = array();
-	foreach ($items as $it) {
-		$cat = isset($it['category']) ? (string)$it['category'] : '';
-		if ($cat === 'artifact') {
-			$artifact_by_code[(string)$it['item_code']] = $it;
-		} elseif ($cat === 'consumable') {
-			$consumable_by_code[(string)$it['item_code']] = $it;
-		} elseif ($cat === 'equipment') {
-			$equipment_rows[] = $it;
-		}
-	}
-
-	usort($equipment_rows, function($a, $b) use ($grade_order) {
-		$ga = isset($grade_order[$a['item_grade']]) ? (int)$grade_order[$a['item_grade']] : 0;
-		$gb = isset($grade_order[$b['item_grade']]) ? (int)$grade_order[$b['item_grade']] : 0;
-		if ($ga !== $gb) return ($gb - $ga);
-		if ((int)$a['is_equipped'] !== (int)$b['is_equipped']) return ((int)$b['is_equipped'] - (int)$a['is_equipped']);
-		return ((int)$b['item_id'] - (int)$a['item_id']);
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 	});
 
 	$artifact_effects = get_user_artifact_effects($pdo, $uid);
 	$equip_effects = get_user_equipment_effects($pdo, $uid);
-<<<<<<< HEAD
 	
 	$equipped_map = [];
 	foreach ($equipped_items as $item) {
@@ -2449,53 +2349,6 @@ function render_item_bag_html(PDO $pdo, $uid, $gold) {
 		$item_id = $row ? (int)$row['item_id'] : 0;
 		$use_btn = ($qty > 0) ? "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#26a69a;' onclick='useItem({$item_id})'>사용</button>" : "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#555;' disabled>사용</button>";
 		$buy_btn = ($def['shop_buyable'] ?? false) ? "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#546e7a;' onclick=\"buyItem('{$code}')\">구매(" . number_format((int)$def['shop_cost']) . "G)</button>" : "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#555;' disabled>상점 미판매</button>";
-=======
-	$equipped_by_slot = array();
-	foreach ($equipment_rows as $eq_row) {
-		if ((int)$eq_row['is_equipped'] !== 1) continue;
-		$slot_key = isset($eq_row['slot_type']) ? (string)$eq_row['slot_type'] : '';
-		if ($slot_key === '') continue;
-		if (!isset($equipped_by_slot[$slot_key])) {
-			$equipped_by_slot[$slot_key] = $eq_row;
-		}
-	}
-
-	$html = "<div style='display:grid; gap:10px;'>";
-	$html .= "<div style='background:#1f1f1f; border:1px solid #3b3b3b; border-radius:6px; padding:10px;'>";
-	$html .= "<div style='display:flex; justify-content:space-between; align-items:center; gap:8px;'><b style='color:#ffd54f;'>🎒 아이템 가방</b><span style='color:#ffecb3;'>보유 골드: <b>" . number_format((int)$gold) . "G</b></span></div>";
-	$html .= "<div style='margin-top:6px; color:#9e9e9e; font-size:0.82rem;'>소모품은 수동 조작 시에만 사용되며 자동 전투 AI는 사용하지 않습니다.</div>";
-	$html .= "</div>";
-
-	$html .= "<div style='background:#222; border-radius:6px; padding:10px; border:1px solid #3a3a3a;'>";
-	$html .= "<h3 style='margin:0 0 6px 0; color:#ffb74d;'>🗿 유물 (Artifacts)</h3>";
-	$html .= "<div style='font-size:0.8rem; color:#bdbdbd; margin-bottom:8px;'>활성 효과: " . htmlspecialchars(get_item_effect_text($artifact_effects), ENT_QUOTES, 'UTF-8') . "</div>";
-	foreach ($artifacts as $code => $def) {
-		$owned = isset($artifact_by_code[$code]);
-		$status = $owned ? "<span style='color:#66bb6a;'>[보유 중]</span>" : "<span style='color:#90a4ae;'>[미보유]</span>";
-		$html .= "<div style='background:#1a1a1a; border:1px solid #333; border-radius:5px; padding:8px; margin-bottom:6px;'>";
-		$html .= "<div><b style='color:#ffd54f;'>" . htmlspecialchars($def['name'], ENT_QUOTES, 'UTF-8') . "</b> {$status}</div>";
-		$html .= "<div style='font-size:0.82rem; color:#cfd8dc; margin-top:4px;'>" . htmlspecialchars($def['description'], ENT_QUOTES, 'UTF-8') . "</div>";
-		$html .= "</div>";
-	}
-	$html .= "<div style='font-size:0.76rem; color:#90a4ae;'>획득처: 10층 단위 보스 확정 드랍</div>";
-	$html .= "</div>";
-
-	$html .= "<div style='background:#222; border-radius:6px; padding:10px; border:1px solid #3a3a3a;'>";
-	$html .= "<h3 style='margin:0 0 6px 0; color:#80cbc4;'>🧪 소모품 (Consumables)</h3>";
-	foreach ($consumables as $code => $def) {
-		$row = isset($consumable_by_code[$code]) ? $consumable_by_code[$code] : null;
-		$qty = $row ? max(0, (int)$row['quantity']) : 0;
-		$item_id = $row ? (int)$row['item_id'] : 0;
-		$is_shop_buyable = !isset($def['shop_buyable']) || (bool)$def['shop_buyable'];
-		$use_btn = ($qty > 0)
-			? "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#26a69a;' onclick='useItem({$item_id})'>사용</button>"
-			: "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#555;' disabled>사용</button>";
-		if ($is_shop_buyable) {
-			$buy_btn = "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#546e7a;' onclick=\"buyItem('{$code}')\">구매(" . number_format((int)$def['shop_cost']) . "G)</button>";
-		} else {
-			$buy_btn = "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#555;' disabled>상점 미판매</button>";
-		}
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 		$html .= "<div style='background:#1a1a1a; border:1px solid #333; border-radius:5px; padding:8px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; gap:8px;'>";
 		$html .= "<div><div><b style='color:#b2dfdb;'>" . htmlspecialchars($def['name'], ENT_QUOTES, 'UTF-8') . "</b> x{$qty}</div><div style='font-size:0.8rem; color:#b0bec5; margin-top:2px;'>" . htmlspecialchars($def['description'], ENT_QUOTES, 'UTF-8') . "</div></div>";
 		$html .= "<div style='display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;'>{$use_btn}{$buy_btn}</div>";
@@ -2503,7 +2356,6 @@ function render_item_bag_html(PDO $pdo, $uid, $gold) {
 	}
 	$html .= "</div>";
 
-<<<<<<< HEAD
 	// -- Artifacts Tab --
 	$html .= "<div id='tab-artifact' class='item-tab-content' style='background:#222; border-radius:6px; padding:10px; border:1px solid #3a3a3a;'>";
 	$html .= "<h3 style='margin:0 0 6px 0; color:#ffb74d;'>🗿 유물</h3>";
@@ -2541,69 +2393,6 @@ function render_item_bag_html(PDO $pdo, $uid, $gold) {
 	document.querySelector('.item-tab-link').click();
 	</script>";
 
-=======
-	$grade_counts = array('일반' => 0, '희귀' => 0, '영웅' => 0);
-	foreach ($equipment_rows as $eq) {
-		if ((int)$eq['is_equipped'] === 1) continue;
-		$gr = isset($eq['item_grade']) ? (string)$eq['item_grade'] : '일반';
-		if (isset($grade_counts[$gr])) $grade_counts[$gr] += 1;
-	}
-
-	$html .= "<div style='background:#222; border-radius:6px; padding:10px; border:1px solid #3a3a3a;'>";
-	$html .= "<h3 style='margin:0 0 6px 0; color:#90caf9;'>🛡️ 장비 (Equipment)</h3>";
-	$html .= "<div style='font-size:0.8rem; color:#bdbdbd; margin-bottom:8px;'>적용 효과: " . htmlspecialchars(get_item_effect_text($equip_effects), ENT_QUOTES, 'UTF-8') . "</div>";
-	if (empty($equipment_rows)) {
-		$html .= "<div style='color:#90a4ae;'>보유한 장비가 없습니다.</div>";
-	} else {
-		foreach ($equipment_rows as $eq) {
-			$item_id = (int)$eq['item_id'];
-			$is_equipped = ((int)$eq['is_equipped'] === 1);
-			$stats = decode_item_stats(isset($eq['stats_json']) ? $eq['stats_json'] : '');
-			$slot_type = isset($eq['slot_type']) ? (string)$eq['slot_type'] : '';
-			$before_effects = normalize_equipment_effect_set($equip_effects);
-			$after_effects = $before_effects;
-			$tooltip_title = $is_equipped ? '해제 후 예상' : '장착 후 예상';
-			if ($is_equipped) {
-				$after_effects = apply_equipment_effect_delta($after_effects, $stats, -1);
-			} else {
-				if ($slot_type !== '' && isset($equipped_by_slot[$slot_type])) {
-					$equipped_row = $equipped_by_slot[$slot_type];
-					if ((int)$equipped_row['item_id'] !== $item_id) {
-						$equipped_stats = decode_item_stats(isset($equipped_row['stats_json']) ? $equipped_row['stats_json'] : '');
-						$after_effects = apply_equipment_effect_delta($after_effects, $equipped_stats, -1);
-					}
-				}
-				$after_effects = apply_equipment_effect_delta($after_effects, $stats, 1);
-			}
-			$compare_tooltip_text = build_equipment_compare_tooltip($before_effects, $after_effects, $tooltip_title);
-			$compare_tooltip_attr = escape_attr_text($compare_tooltip_text);
-			$btn = $is_equipped
-				? "<button class='btn' data-tooltip='{$compare_tooltip_attr}' style='padding:6px 10px; font-size:0.8rem; background:#8d6e63;' onclick='toggleEquipItem({$item_id}, -1)'>해제</button>"
-				: "<button class='btn' data-tooltip='{$compare_tooltip_attr}' style='padding:6px 10px; font-size:0.8rem; background:#42a5f5;' onclick='toggleEquipItem({$item_id}, 1)'>장착</button>";
-			$state = $is_equipped ? "<span style='color:#81c784;'>[장착 중]</span>" : "<span style='color:#90a4ae;'>[대기]</span>";
-			$html .= "<div title='{$compare_tooltip_attr}' style='background:#1a1a1a; border:1px solid #333; border-radius:5px; padding:8px; margin-bottom:6px; display:flex; justify-content:space-between; gap:8px; align-items:center;'>";
-			$html .= "<div title='{$compare_tooltip_attr}'><div><b style='color:#90caf9;'>" . htmlspecialchars((string)$eq['item_name'], ENT_QUOTES, 'UTF-8') . "</b> {$state}</div>";
-			$html .= "<div style='font-size:0.8rem; color:#b0bec5; margin-top:2px;'>등급: " . htmlspecialchars((string)$eq['item_grade'], ENT_QUOTES, 'UTF-8') . " | 슬롯: " . htmlspecialchars(get_slot_label((string)$eq['slot_type']), ENT_QUOTES, 'UTF-8') . "</div>";
-			$html .= "<div style='font-size:0.8rem; color:#c5e1a5; margin-top:2px;'>" . htmlspecialchars(get_item_effect_text($stats), ENT_QUOTES, 'UTF-8') . "</div></div>";
-			$html .= $btn;
-			$html .= "</div>";
-		}
-	}
-
-	$can_common = ($grade_counts['일반'] >= 3) ? '' : 'disabled';
-	$can_rare = ($grade_counts['희귀'] >= 3) ? '' : 'disabled';
-	$can_epic = ($grade_counts['영웅'] >= 3) ? '' : 'disabled';
-	$html .= "<div style='margin-top:8px; padding-top:8px; border-top:1px dashed #444;'>";
-	$html .= "<div style='font-size:0.8rem; color:#b0bec5; margin-bottom:6px;'>동일 등급 장비 3개 합성 -> 상위 등급 1개 무작위 획득</div>";
-	$html .= "<div style='display:flex; gap:6px; flex-wrap:wrap;'>";
-	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#455a64;' {$can_common} onclick=\"synthesizeEquipment('일반')\">일반 3합성 (" . (int)$grade_counts['일반'] . "/3)</button>";
-	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#5d4037;' {$can_rare} onclick=\"synthesizeEquipment('희귀')\">희귀 3합성 (" . (int)$grade_counts['희귀'] . "/3)</button>";
-	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#6a1b9a;' {$can_epic} onclick=\"synthesizeEquipment('영웅')\">영웅 3합성 (" . (int)$grade_counts['영웅'] . "/3)</button>";
-	$html .= "</div></div>";
-	$html .= "</div>";
-
-	$html .= "</div>";
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 	return $html;
 }
 
@@ -3551,7 +3340,6 @@ function handle_combat(PDO $pdo) {
 		$equip_attack_pct = max(0, (int)(isset($equipment_effects['attack_pct']) ? $equipment_effects['attack_pct'] : 0));
 		$equip_damage_reduction_pct = max(0, (int)(isset($equipment_effects['damage_reduction_pct']) ? $equipment_effects['damage_reduction_pct'] : 0));
 		$equip_crit_chance = max(0, (int)(isset($equipment_effects['crit_chance']) ? $equipment_effects['crit_chance'] : 0));
-<<<<<<< HEAD
 		$equip_crit_damage_pct = max(0, (int)(isset($equipment_effects['crit_damage_pct']) ? $equipment_effects['crit_damage_pct'] : 0));
 		$equip_double_attack_bonus = max(0, (int)(isset($equipment_effects['double_attack_bonus']) ? $equipment_effects['double_attack_bonus'] : 0));
 		$equip_lifesteal_pct = max(0, (int)(isset($equipment_effects['lifesteal_pct']) ? $equipment_effects['lifesteal_pct'] : 0));
@@ -3602,29 +3390,14 @@ function handle_combat(PDO $pdo) {
 			$actual_hp_regen = max(0, $new_hp - $before_hp_regen);
 			if ($actual_hp_regen > 0) {
 				$logs[] = "💚 <span style='color:#a5d6a7;'>[턴 회복]</span> HP +{$actual_hp_regen}";
-=======
-		$equip_double_attack_bonus = max(0, (int)(isset($equipment_effects['double_attack_bonus']) ? $equipment_effects['double_attack_bonus'] : 0));
-		$equip_lifesteal_pct = max(0, (int)(isset($equipment_effects['lifesteal_pct']) ? $equipment_effects['lifesteal_pct'] : 0));
-		$_SESSION['combat_state']['artifact_poison_bonus_pct'] = $artifact_poison_bonus_pct;
-
-		// 축복/내실 MP 리젠은 synergy 이후 다시 적용
-		if ($mod_mp_regen > 0) {
-			$regen_mp2 = min($mod_mp_regen, max(0, (int)$cmd['max_mp'] - $new_mp));
-			if ($regen_mp2 > 0) {
-				$new_mp += $regen_mp2;
-				$logs[] = "✨ <span style='color:#ce93d8;'>[제단 축복]</span> 턴 시작 MP +{$regen_mp2}";
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 			}
 		}
 
 		$crit_chance = min(100, max(0, floor($p_luk / 2) + $equip_crit_chance + $disp_crit_bonus));
 		$crit_mult = 1.5 + ($p_luk * 0.01);
-<<<<<<< HEAD
 		if ($equip_crit_damage_pct > 0) {
 			$crit_mult *= (1 + ($equip_crit_damage_pct / 100.0));
 		}
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 		if ($disp_crit_damage_bonus_pct > 0) {
 			$crit_mult *= (1 + ($disp_crit_damage_bonus_pct / 100.0));
 		}
@@ -3633,11 +3406,7 @@ function handle_combat(PDO $pdo) {
 		}
 		$men_mult = 1 + ($p_men * 0.005);
 		$agi_double_chance = min(95, floor($p_agi / 5) + $synergy_double_attack_pp + $equip_double_attack_bonus);
-<<<<<<< HEAD
 		$agi_evasion_chance = min(100, max(0, (int)floor($p_agi / 4) + $disp_evasion_bonus + $equip_evasion_pct));
-=======
-		$agi_evasion_chance = min(100, max(0, (int)floor($p_agi / 4) + $disp_evasion_bonus));
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 		$vit_block_chance = min(100, floor($p_vit / 5) + $disp_block_bonus);
 		$hero_shield_chance = (count($deck) > 0) ? min(40, (int)floor($p_vit / 10)) : 0;
 		$str_party_bonus_pct = (int)floor($p_str / 10) * 2;
@@ -3663,12 +3432,9 @@ function handle_combat(PDO $pdo) {
 				if ($disp_status_resist_pct > 0) {
 					$opening_dmg = max(1, (int)floor($opening_dmg * (1 - min(35, $disp_status_resist_pct) / 100.0)));
 				}
-<<<<<<< HEAD
 				if ($equip_incoming_damage_amp_pct > 0) {
 					$opening_dmg = max(1, (int)floor($opening_dmg * (1 + (min(80, $equip_incoming_damage_amp_pct) / 100.0))));
 				}
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 				if ($agi_evasion_chance > 0 && rand(1, 100) <= min(85, (int)floor($agi_evasion_chance * 0.6))) {
 					$opening_dmg = 0;
 					$logs[] = "💨 <span style='color:#80d8ff; font-weight:bold;'>[기습 회피]</span> 적의 선제타를 흘려냈습니다.";
@@ -3712,11 +3478,7 @@ function handle_combat(PDO $pdo) {
 			if ($equip_lifesteal_pct > 0 && $player_dmg > 0 && $new_hp > 0) {
 				$heal = max(1, (int)floor($player_dmg * ($equip_lifesteal_pct / 100.0)));
 				$before_hp = $new_hp;
-<<<<<<< HEAD
 				$new_hp = min($effective_max_hp, $new_hp + $heal);
-=======
-				$new_hp = min((int)$cmd['max_hp'], $new_hp + $heal);
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 				$actual_heal = max(0, $new_hp - $before_hp);
 				if ($actual_heal > 0) {
 					$logs[] = "🩸 <span style='color:#a5d6a7;'>[흡혈]</span> 공격 피해를 흡수해 HP <b>+{$actual_heal}</b>";
@@ -3811,12 +3573,9 @@ function handle_combat(PDO $pdo) {
 			if ($mod_gold_bonus_pct > 0) {
 				$reward_gold_total = (int)floor($reward_gold_total * (1 + ($mod_gold_bonus_pct / 100.0)));
 			}
-<<<<<<< HEAD
 			if ($equip_gold_bonus_pct > 0) {
 				$reward_gold_total = (int)floor($reward_gold_total * (1 + ($equip_gold_bonus_pct / 100.0)));
 			}
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 			if ($mod_exp_bonus_pct > 0) {
 				$reward_exp_total = (int)floor($reward_exp_total * (1 + ($mod_exp_bonus_pct / 100.0)));
 			}
@@ -3875,12 +3634,9 @@ function handle_combat(PDO $pdo) {
 				if ($disp_status_resist_pct > 0) {
 					$mob_dmg = max(1, (int)floor($mob_dmg * (1 - min(35, $disp_status_resist_pct) / 100.0)));
 				}
-<<<<<<< HEAD
 				if ($equip_incoming_damage_amp_pct > 0) {
 					$mob_dmg = max(1, (int)floor($mob_dmg * (1 + (min(80, $equip_incoming_damage_amp_pct) / 100.0))));
 				}
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 				$shield_left = 0;
 				if ($synergy_shield_pct > 0) {
 					$shield_left = max(1, (int)floor((int)$cmd['max_hp'] * ($synergy_shield_pct / 100.0)));
@@ -4374,7 +4130,6 @@ function handle_skill(PDO $pdo) {
 		$equip_attack_pct = 0;
 		$equip_damage_reduction_pct = 0;
 		$equip_crit_chance = 0;
-<<<<<<< HEAD
 		$equip_crit_damage_pct = 0;
 		$equip_double_attack_bonus = 0;
 		$equip_magic_damage_pct = 0;
@@ -4390,18 +4145,12 @@ function handle_skill(PDO $pdo) {
 		$equip_gold_bonus_pct = 0;
 		$equip_status_resist_pct = 0;
 		$equip_incoming_damage_amp_pct = 0;
-=======
-		$equip_double_attack_bonus = 0;
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 		$mod_incoming_reduction_pct = 0;
 		$disp_status_resist_pct = (int)$disp_mods['status_resist_pct'];
 		$initiative_info = array('is_first_turn' => false, 'side' => 'none');
 		$is_boss_mob = (strpos((string)$cmd['mob_name'], '[보스]') !== false);
-<<<<<<< HEAD
 		$effective_max_hp = (int)$cmd['max_hp'];
 		$effective_max_mp = (int)$cmd['max_mp'];
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 
 		if ($is_in_combat) {
 			$artifact_effects = get_user_artifact_effects($pdo, $uid);
@@ -4412,7 +4161,6 @@ function handle_skill(PDO $pdo) {
 			$equip_attack_pct = max(0, (int)(isset($equipment_effects['attack_pct']) ? $equipment_effects['attack_pct'] : 0));
 			$equip_damage_reduction_pct = max(0, (int)(isset($equipment_effects['damage_reduction_pct']) ? $equipment_effects['damage_reduction_pct'] : 0));
 			$equip_crit_chance = max(0, (int)(isset($equipment_effects['crit_chance']) ? $equipment_effects['crit_chance'] : 0));
-<<<<<<< HEAD
 			$equip_crit_damage_pct = max(0, (int)(isset($equipment_effects['crit_damage_pct']) ? $equipment_effects['crit_damage_pct'] : 0));
 			$equip_double_attack_bonus = max(0, (int)(isset($equipment_effects['double_attack_bonus']) ? $equipment_effects['double_attack_bonus'] : 0));
 			$equip_magic_damage_pct = max(0, (int)(isset($equipment_effects['magic_damage_pct']) ? $equipment_effects['magic_damage_pct'] : 0));
@@ -4440,10 +4188,6 @@ function handle_skill(PDO $pdo) {
 			$effective_max_mp = max(1, $effective_max_mp);
 			$new_hp = min($effective_max_hp, $new_hp);
 			$new_mp = min($effective_max_mp, $new_mp);
-=======
-			$equip_double_attack_bonus = max(0, (int)(isset($equipment_effects['double_attack_bonus']) ? $equipment_effects['double_attack_bonus'] : 0));
-			$mod_incoming_reduction_pct = max(0, (int)(isset($runtime_mods['incoming_reduction_pct']) ? $runtime_mods['incoming_reduction_pct'] : 0));
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 			$hero_crit_chance = min(100, max(0, floor($p_luk / 2) + $equip_crit_chance + $disp_crit_bonus));
 			$_SESSION['combat_state']['artifact_poison_bonus_pct'] = $artifact_poison_bonus_pct;
 
@@ -4477,13 +4221,10 @@ function handle_skill(PDO $pdo) {
 			$_SESSION['combat_state']['orc_frenzy_stacks'] = $orc_stacks;
 
 			$agi_double_chance = min(95, $agi_double_chance + $synergy_double_attack_pp + $equip_double_attack_bonus);
-<<<<<<< HEAD
 			$agi_double_chance = min(95, $agi_double_chance + (int)floor($equip_evasion_pct / 2));
 			if ($equip_crit_damage_pct > 0) {
 				$crit_mult *= (1 + ($equip_crit_damage_pct / 100.0));
 			}
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 			if ($synergy_crit_bonus_pct > 0) {
 				$crit_mult *= (1 + ($synergy_crit_bonus_pct / 100.0));
 			}
@@ -4505,12 +4246,9 @@ function handle_skill(PDO $pdo) {
 					if ($disp_status_resist_pct > 0) {
 						$opening_dmg = max(1, (int)floor($opening_dmg * (1 - min(35, $disp_status_resist_pct) / 100.0)));
 					}
-<<<<<<< HEAD
 					if ($equip_incoming_damage_amp_pct > 0) {
 						$opening_dmg = max(1, (int)floor($opening_dmg * (1 + (min(80, $equip_incoming_damage_amp_pct) / 100.0))));
 					}
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 					$new_hp = max(0, $new_hp - $opening_dmg);
 					$logs[] = "⚠️ <span style='color:#ff8a80; font-weight:bold;'>[선공 빼앗김]</span> {$cmd['mob_name']}의 기습으로 <b>{$opening_dmg}</b> 피해.";
 				}
@@ -4523,10 +4261,7 @@ function handle_skill(PDO $pdo) {
 			if (!$is_in_combat) throw new Exception('해당 스킬은 전투 중에만 사용 가능합니다.');
 			$damage = (int)floor(((int)$skill['value'] + floor((int)$cmd['stat_mag'] * 1.5)) * $mag_amp);
 			if ($equip_attack_pct > 0) $damage = (int)floor($damage * (1 + ($equip_attack_pct / 100.0)));
-<<<<<<< HEAD
 			if ($equip_magic_damage_pct > 0) $damage = (int)floor($damage * (1 + ($equip_magic_damage_pct / 100.0)));
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 			if ($berserk_bonus_pct > 0) $damage = (int)floor($damage * (1 + ($berserk_bonus_pct / 100)));
 			if ($synergy_first_hit_bonus_pct > 0) {
 				$damage = (int)floor($damage * (1 + ($synergy_first_hit_bonus_pct / 100.0)));
@@ -4615,14 +4350,9 @@ function handle_skill(PDO $pdo) {
 		$reward_meta = null;
 		$orc_kill_this_turn = false;
 		if ($is_in_combat) {
-<<<<<<< HEAD
 			if ($synergy_mp_regen > 0 || $equip_mana_regen_flat > 0) {
 				$total_regen_mp = $synergy_mp_regen + $equip_mana_regen_flat;
 				$regen_mp = min($total_regen_mp, max(0, $effective_max_mp - $new_mp));
-=======
-			if ($synergy_mp_regen > 0) {
-				$regen_mp = min($synergy_mp_regen, max(0, (int)$cmd['max_mp'] - $new_mp));
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 				if ($regen_mp > 0) {
 					$new_mp += $regen_mp;
 					$logs[] = "🔷 <span style='color:#90caf9;'>[정령 공명]</span> 턴 종료 MP +{$regen_mp}";
@@ -4657,12 +4387,9 @@ function handle_skill(PDO $pdo) {
 				if ($artifact_battle_gold_bonus_pct > 0) {
 					$reward_gold_total = (int)floor($reward_gold_total * (1 + ($artifact_battle_gold_bonus_pct / 100.0)));
 				}
-<<<<<<< HEAD
 				if ($equip_gold_bonus_pct > 0) {
 					$reward_gold_total = (int)floor($reward_gold_total * (1 + ($equip_gold_bonus_pct / 100.0)));
 				}
-=======
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 				$reward_meta = apply_commander_rewards($pdo, $uid, array_merge($cmd, array('hp' => $new_hp, 'mp' => $new_mp)), $reward_gold_total, $reward_exp_total, (int)$cmd['current_floor']);
 				$logs[] = "🎖️ 전투 보상: <b>{$reward_gold_total}G</b>, 경험치 <b>+{$reward_exp_total}</b>.";
 				foreach ($reward_meta['levelup_logs'] as $levelup_log) {
@@ -5897,7 +5624,6 @@ function handle_item_toggle_equip(PDO $pdo) {
 		if ((string)$item['category'] !== 'equipment') throw new Exception('장비만 장착할 수 있습니다.');
 
 		if ($action === 1) {
-<<<<<<< HEAD
 			if ((int)$item['is_equipped'] === 1) {
 				throw new Exception('이미 장착된 장비입니다.');
 			}
@@ -5944,17 +5670,6 @@ function handle_item_toggle_equip(PDO $pdo) {
 			$base_slot = get_base_slot_type($item);
 			$pdo->prepare("UPDATE tb_items SET is_equipped = 0, slot_type = ? WHERE item_id = ?")
 				->execute(array($base_slot, $item_id));
-=======
-			$slot = isset($item['slot_type']) ? (string)$item['slot_type'] : '';
-			if ($slot !== '') {
-				$pdo->prepare("UPDATE tb_items SET is_equipped = 0 WHERE uid = ? AND category = 'equipment' AND slot_type = ? AND item_id != ?")
-					->execute(array($uid, $slot, $item_id));
-			}
-			$pdo->prepare("UPDATE tb_items SET is_equipped = 1 WHERE item_id = ?")->execute(array($item_id));
-			$msg = "🛡️ {$item['item_name']} 장비를 장착했습니다.";
-		} else {
-			$pdo->prepare("UPDATE tb_items SET is_equipped = 0 WHERE item_id = ?")->execute(array($item_id));
->>>>>>> 10934270c21144347a74ab39b621c6f2e45575fa
 			$msg = "📦 {$item['item_name']} 장비를 해제했습니다.";
 		}
 
@@ -6278,4 +5993,3 @@ switch ($action) {
 		json_error("API endpoint not found for action: {$action}");
 		break;
 }
-
