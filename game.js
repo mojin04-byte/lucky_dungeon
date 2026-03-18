@@ -13,6 +13,10 @@ const CAUTIOUS_AUTO_REST_MP_THRESHOLD = 0.45;
 const BOLD_AUTO_REST_MP_THRESHOLD = 0.00;
 const AUTO_SKILL_BUFF_DURATION = 3;
 const COLLAPSE_STORAGE_PREFIX = 'ld_panel_collapsed_';
+let centerLogTypingQueue = Promise.resolve();
+let prefetchedCombatTurnData = null;
+let prefetchedCombatTurnPromise = null;
+let combatPrefetchToken = 0;
 
 const BATTLE_STAGE = {
     EXPLORE: 'explore',
@@ -533,12 +537,7 @@ function updateCommanderStatsDisplay(stats = {}) {
 }
 
 function addLog(message, isSystem = false) {
-    const logBox = document.getElementById('game-log');
-    const newLog = document.createElement('div');
-    newLog.className = 'log-entry' + (isSystem ? ' system' : '');
-    newLog.innerHTML = message;
-    logBox.appendChild(newLog);
-    logBox.scrollTop = logBox.scrollHeight;
+    return renderCenterScriptLine(message, { isSystem });
 }
 
 function getTurnDamageSteps(data) {
@@ -585,9 +584,14 @@ function getTurnScriptSteps(data) {
 }
 
 function toPlainLogText(message) {
+    const html = String(message || '')
+        .replace(/<\s*br\s*\/?>/giu, '\n')
+        .replace(/<\s*\/\s*(div|p|li|h1|h2|h3|h4|h5|h6)\s*>/giu, '\n');
     const tmp = document.createElement('div');
-    tmp.innerHTML = String(message || '');
-    return (tmp.textContent || tmp.innerText || '').trim();
+    tmp.innerHTML = html;
+    return (tmp.textContent || tmp.innerText || '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 }
 
 function getCurrentPlayerHp() {
@@ -648,23 +652,25 @@ function resetAutoCombatState() {
     window.autoCombatState = { shieldUpTurns: 0, berserkTurns: 0 };
 }
 
-function advanceAutoCombatState(skillId = '') {
-    const state = ensureAutoCombatState();
-    state.shieldUpTurns = (skillId === 'shield_up')
-        ? AUTO_SKILL_BUFF_DURATION
-        : Math.max(0, Number(state.shieldUpTurns || 0) - 1);
-    state.berserkTurns = (skillId === 'berserk')
-        ? AUTO_SKILL_BUFF_DURATION
-        : Math.max(0, Number(state.berserkTurns || 0) - 1);
-    return state;
+function projectAutoCombatStateAfterAction(state, skillId = '') {
+    const base = (state && typeof state === 'object') ? state : { shieldUpTurns: 0, berserkTurns: 0 };
+    return {
+        shieldUpTurns: (skillId === 'shield_up')
+            ? AUTO_SKILL_BUFF_DURATION
+            : Math.max(0, Number(base.shieldUpTurns || 0) - 1),
+        berserkTurns: (skillId === 'berserk')
+            ? AUTO_SKILL_BUFF_DURATION
+            : Math.max(0, Number(base.berserkTurns || 0) - 1),
+    };
 }
 
-function chooseAutoCombatAction() {
-    const hp = getCurrentPlayerHp();
-    const maxHp = Math.max(1, Number(window.playerMaxHp || 1));
-    const mp = getCurrentPlayerMp();
+function chooseAutoCombatActionFromSnapshot(snapshot = {}) {
+    const hp = Math.max(0, Number(snapshot.hp || 0));
+    const maxHp = Math.max(1, Number(snapshot.maxHp || 1));
+    const mp = Math.max(0, Number(snapshot.mp || 0));
+    const disposition = clampDispositionValue(snapshot.disposition !== undefined ? snapshot.disposition : getCommanderDisposition());
     const hpRatio = hp / maxHp;
-    const state = ensureAutoCombatState();
+    const state = (snapshot.state && typeof snapshot.state === 'object') ? snapshot.state : ensureAutoCombatState();
     const shieldActive = Number(state.shieldUpTurns || 0) > 0;
     const berserkActive = Number(state.berserkTurns || 0) > 0;
 
@@ -674,7 +680,7 @@ function chooseAutoCombatAction() {
     const canShield = !shieldActive;
     const canBerserk = !berserkActive && hpRatio >= 0.55 && hp > Math.max(15, Math.floor(maxHp * 0.18));
 
-    if (isBoldDisposition()) {
+    if (disposition >= 80) {
         if (canBerserk) return 'berserk';
         if (canThunder) return 'thunder_bolt';
         if (canFireball) return 'fireball';
@@ -683,7 +689,7 @@ function chooseAutoCombatAction() {
         return 'attack';
     }
 
-    if (isCautiousDisposition()) {
+    if (disposition <= 20) {
         if (hpRatio <= 0.92 && canHeal) return 'heal';
         if (hpRatio <= 0.98 && canShield) return 'shield_up';
         if (canThunder && hpRatio >= 0.95) return 'thunder_bolt';
@@ -699,6 +705,103 @@ function chooseAutoCombatAction() {
     return 'attack';
 }
 
+function advanceAutoCombatState(skillId = '') {
+    const state = ensureAutoCombatState();
+    const projected = projectAutoCombatStateAfterAction(state, skillId);
+    window.autoCombatState = projected;
+    return projected;
+}
+
+function chooseAutoCombatAction() {
+    return chooseAutoCombatActionFromSnapshot({
+        hp: getCurrentPlayerHp(),
+        maxHp: Math.max(1, Number(window.playerMaxHp || 1)),
+        mp: getCurrentPlayerMp(),
+        state: ensureAutoCombatState(),
+        disposition: getCommanderDisposition(),
+    });
+}
+
+function clearCombatTurnPrefetch() {
+    combatPrefetchToken += 1;
+    prefetchedCombatTurnData = null;
+    prefetchedCombatTurnPromise = null;
+}
+
+function hasCombatTurnPrefetch() {
+    return prefetchedCombatTurnData !== null || !!prefetchedCombatTurnPromise;
+}
+
+async function getCombatTurnData() {
+    if (prefetchedCombatTurnData !== null) {
+        const cached = prefetchedCombatTurnData;
+        prefetchedCombatTurnData = null;
+        return cached;
+    }
+
+    if (prefetchedCombatTurnPromise) {
+        await prefetchedCombatTurnPromise;
+        if (prefetchedCombatTurnData !== null) {
+            const cached = prefetchedCombatTurnData;
+            prefetchedCombatTurnData = null;
+            return cached;
+        }
+    }
+
+    return await callApi('combat');
+}
+
+function startCombatTurnPrefetch() {
+    if (!window.isCombat || !isAutoMode || window.battleStage !== BATTLE_STAGE.COMBAT) return false;
+    if (hasCombatTurnPrefetch()) return false;
+
+    const token = ++combatPrefetchToken;
+    prefetchedCombatTurnPromise = callApi('combat')
+        .then((data) => {
+            if (token !== combatPrefetchToken) return null;
+            prefetchedCombatTurnData = data;
+            return data;
+        })
+        .catch(() => null)
+        .finally(() => {
+            if (token === combatPrefetchToken) {
+                prefetchedCombatTurnPromise = null;
+            }
+        });
+    return true;
+}
+
+function queueNextAutoCombatPrefetch(currentTurnData, snapshot = {}) {
+    if (!isAutoMode || !window.isCombat || window.battleStage !== BATTLE_STAGE.COMBAT) {
+        clearCombatTurnPrefetch();
+        return false;
+    }
+    if (!currentTurnData || currentTurnData.status !== 'ongoing') {
+        clearCombatTurnPrefetch();
+        return false;
+    }
+
+    const projectedState = projectAutoCombatStateAfterAction(ensureAutoCombatState(), 'attack');
+    const predictedNextAction = chooseAutoCombatActionFromSnapshot({
+        hp: Math.max(0, Number(snapshot.hp || 0)),
+        maxHp: Math.max(1, Number(snapshot.maxHp || 1)),
+        mp: Math.max(0, Number(snapshot.mp || 0)),
+        state: projectedState,
+        disposition: snapshot.disposition !== undefined ? snapshot.disposition : getCommanderDisposition(),
+    });
+
+    if (predictedNextAction !== 'attack') {
+        clearCombatTurnPrefetch();
+        return false;
+    }
+
+    return startCombatTurnPrefetch();
+}
+
+function getAutoCombatPostTurnDelay() {
+    return hasCombatTurnPrefetch() ? 24 : 180;
+}
+
 function scheduleAutoCombatAction(delay = 420) {
     clearCombatTimer();
     if (!isAutoMode || !window.isCombat || isProcessingTurn || window.battleStage !== BATTLE_STAGE.COMBAT) return;
@@ -707,6 +810,10 @@ function scheduleAutoCombatAction(delay = 420) {
 
 async function runAutoCombatAction() {
     if (!isAutoMode || !window.isCombat || isProcessingTurn || window.battleStage !== BATTLE_STAGE.COMBAT) return;
+    if (hasCombatTurnPrefetch()) {
+        await doCombatTurn();
+        return;
+    }
     const nextAction = chooseAutoCombatAction();
     if (nextAction === 'attack') {
         await doCombatTurn();
@@ -845,6 +952,7 @@ function disableAutoRestMode(logMessage = '') {
 async function typeText(targetEl, text, delayMs = 8) {
     const chars = Array.from(String(text || ''));
     for (const ch of chars) {
+        if (!targetEl || !targetEl.isConnected) return;
         targetEl.textContent += ch;
         const logBox = document.getElementById('game-log');
         if (logBox) logBox.scrollTop = logBox.scrollHeight;
@@ -852,11 +960,216 @@ async function typeText(targetEl, text, delayMs = 8) {
     }
 }
 
+function enqueueCenterLogTyping(task) {
+    const nextTask = centerLogTypingQueue.catch(() => {}).then(task);
+    centerLogTypingQueue = nextTask.catch(() => {});
+    return nextTask;
+}
+
+function createCenterScriptLineElement(plainText, isSystem = false, extraClass = '') {
+    const logBox = document.getElementById('game-log');
+    if (!logBox) return null;
+
+    const newLog = document.createElement('div');
+    newLog.className = 'log-entry' + (isSystem ? ' system' : '') + (extraClass ? ` ${extraClass}` : '');
+    newLog.style.whiteSpace = 'pre-wrap';
+    newLog.dataset.plainText = plainText;
+    newLog.textContent = '';
+    logBox.appendChild(newLog);
+    logBox.scrollTop = logBox.scrollHeight;
+    return newLog;
+}
+
+function renderCenterScriptLine(message, options = {}) {
+    const plain = toPlainLogText(message);
+    if (!plain) return Promise.resolve(null);
+
+    const isSystem = Boolean(options.isSystem);
+    const extraClass = options.extraClass || '';
+    const delayMs = Math.max(1, Number(options.delayMs || 8));
+    const targetEl = createCenterScriptLineElement(plain, isSystem, extraClass);
+    if (!targetEl) return Promise.resolve(null);
+
+    return enqueueCenterLogTyping(async () => {
+        if (!targetEl.isConnected) return targetEl;
+        await typeText(targetEl, plain, delayMs);
+        return targetEl;
+    });
+}
+
 function getStatusEffectLines(data) {
     const lines = (data && Array.isArray(data.status_effect_logs)) ? data.status_effect_logs : [];
     return lines
         .map((line) => `🧪 [상태이상] ${toPlainLogText(line)}`)
         .filter((line) => line.trim() !== '');
+}
+
+function getPlainLogLines(logs) {
+    const lines = Array.isArray(logs) ? logs : [];
+    return lines
+        .map((line) => toPlainLogText(line))
+        .filter((line) => line.trim() !== '');
+}
+
+async function renderPlainLogBlock(targetEl, logs, extraClass = '') {
+    if (!targetEl) return;
+    const lines = getPlainLogLines(logs);
+    if (lines.length === 0) return;
+
+    const textEl = targetEl.querySelector('.turn-script-lines') || targetEl.querySelector('.stream-text') || targetEl;
+    if (!textEl) return;
+    textEl.innerHTML = '';
+    textEl.style.whiteSpace = 'pre-wrap';
+
+    for (const line of lines) {
+        const lineEl = document.createElement('div');
+        lineEl.className = 'turn-script-line' + (extraClass ? ` ${extraClass}` : '');
+        textEl.appendChild(lineEl);
+        await typeText(lineEl, line);
+        const logBox = document.getElementById('game-log');
+        if (logBox) logBox.scrollTop = logBox.scrollHeight;
+        await wait(20);
+    }
+}
+
+function createCenterScriptBlock(title = '[전투 스크립트 ✨]', headerColor = '#ff5252') {
+    const logBox = document.getElementById('game-log');
+    const block = document.createElement('div');
+    block.className = 'log-entry system';
+    block.innerHTML = "<div class='turn-script-header'></div><div class='turn-script-lines'></div><div class='stream-text'></div>";
+
+    const headerEl = block.querySelector('.turn-script-header');
+    const narrativeEl = block.querySelector('.stream-text');
+    if (headerEl) {
+        headerEl.style.color = headerColor;
+        headerEl.style.fontWeight = 'bold';
+        headerEl.textContent = '';
+    }
+    if (narrativeEl) {
+        narrativeEl.style.whiteSpace = 'pre-wrap';
+        narrativeEl.style.marginTop = '6px';
+        narrativeEl.style.display = 'none';
+        narrativeEl.textContent = '';
+    }
+
+    if (logBox) {
+        logBox.appendChild(block);
+        logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    return {
+        logBox,
+        block,
+        headerEl,
+        narrativeEl,
+    };
+}
+
+function shouldSkipCenterScriptNarrative(meta) {
+    const provider = String((meta && meta.provider) || '').toLowerCase();
+    const model = String((meta && meta.model) || '').toLowerCase();
+    return provider === 'raw' || model === 'local-fallback';
+}
+
+async function streamCenterScriptNarrative(scriptBlock, streamUrl, options = {}) {
+    if (!scriptBlock || !scriptBlock.narrativeEl || !streamUrl) {
+        return { skipped: true, meta: null };
+    }
+
+    const narrativeEl = scriptBlock.narrativeEl;
+    const logBox = scriptBlock.logBox;
+    const onLogAppend = typeof options.onLogAppend === 'function' ? options.onLogAppend : null;
+    const perCharDelay = Math.max(1, Number(options.perCharDelay || 12));
+    const skipRawFallback = options.skipRawFallback !== false;
+
+    let sseBuffer = '';
+    let sseDone = false;
+    let meta = null;
+    let skipNarrative = false;
+
+    const source = new EventSource(streamUrl);
+    source.onmessage = function(event) {
+        if (event.data === '[DONE]') {
+            source.close();
+            sseDone = true;
+            return;
+        }
+
+        try {
+            const chunk = JSON.parse(event.data);
+            if (chunk.meta) {
+                meta = chunk.meta;
+                skipNarrative = skipRawFallback && shouldSkipCenterScriptNarrative(meta);
+                if (skipNarrative) {
+                    source.close();
+                    sseDone = true;
+                    return;
+                }
+            }
+            if (chunk.text) {
+                narrativeEl.style.display = 'block';
+                sseBuffer += chunk.text;
+            }
+            if (chunk.log_append && onLogAppend) {
+                onLogAppend(chunk.log_append);
+            }
+        } catch (error) {
+            console.error('streamCenterScriptNarrative parse error:', error);
+        }
+    };
+    source.onerror = function() {
+        source.close();
+        sseDone = true;
+    };
+
+    let displayedIdx = 0;
+    while (!sseDone || displayedIdx < sseBuffer.length) {
+        if (displayedIdx < sseBuffer.length) {
+            narrativeEl.textContent += sseBuffer.charAt(displayedIdx);
+            displayedIdx += 1;
+            if (logBox) logBox.scrollTop = logBox.scrollHeight;
+            await wait(perCharDelay);
+            continue;
+        }
+        await wait(7);
+    }
+
+    if (skipNarrative || narrativeEl.textContent.trim() === '') {
+        narrativeEl.style.display = 'none';
+        narrativeEl.textContent = '';
+    }
+
+    return { skipped: skipNarrative, meta };
+}
+
+async function renderCenterScriptMessage(options = {}) {
+    const title = options.title || '[전투 스크립트 ✨]';
+    const headerColor = options.headerColor || '#ff5252';
+    const renderBody = typeof options.renderBody === 'function' ? options.renderBody : null;
+    const streamUrl = options.streamUrl || '';
+    const scriptBlock = createCenterScriptBlock(title, headerColor);
+
+    if (scriptBlock.headerEl) {
+        await typeText(scriptBlock.headerEl, title, 7);
+    }
+
+    if (renderBody) {
+        await renderBody(scriptBlock.block);
+    }
+
+    if (scriptBlock.logBox) {
+        scriptBlock.logBox.scrollTop = scriptBlock.logBox.scrollHeight;
+    }
+
+    if (streamUrl) {
+        await streamCenterScriptNarrative(scriptBlock, streamUrl, {
+            skipRawFallback: options.skipRawFallback,
+            perCharDelay: options.perCharDelay,
+            onLogAppend: options.onLogAppend,
+        });
+    }
+
+    return scriptBlock;
 }
 
 async function renderTurnScriptBlock(targetEl, data, options = {}) {
@@ -868,7 +1181,7 @@ async function renderTurnScriptBlock(targetEl, data, options = {}) {
     const textEl = targetEl.querySelector('.turn-script-lines') || targetEl.querySelector('.stream-text');
     if (!textEl) return;
     textEl.innerHTML = '';
-    textEl.style.whiteSpace = 'normal';
+    textEl.style.whiteSpace = 'pre-wrap';
 
     let currentMobHp = Number((options.initialMobHp !== undefined) ? options.initialMobHp : (window.currentMobHp || 0));
     const finalMobHp = Math.max(0, Number((options.finalMobHp !== undefined) ? options.finalMobHp : ((data && data.mob_hp) || currentMobHp)));
@@ -921,16 +1234,7 @@ async function renderTurnScriptBlock(targetEl, data, options = {}) {
 }
 
 async function addTypedLogLine(message, isSystem = true, extraClass = '') {
-    const plain = toPlainLogText(message);
-    if (!plain) return;
-    const logBox = document.getElementById('game-log');
-    const newLog = document.createElement('div');
-    newLog.className = 'log-entry' + (isSystem ? ' system' : '') + (extraClass ? ` ${extraClass}` : '');
-    newLog.style.whiteSpace = 'pre-wrap';
-    newLog.textContent = '';
-    logBox.appendChild(newLog);
-    logBox.scrollTop = logBox.scrollHeight;
-    await typeText(newLog, plain);
+    await renderCenterScriptLine(message, { isSystem, extraClass });
 }
 
 async function addTurnDamageBreakdown(data, options = {}) {
@@ -1067,6 +1371,7 @@ const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 function enterDeadState() {
     window.isDead = true;
     window.isCombat = false;
+    clearCombatTurnPrefetch();
     clearCombatTimer();
     clearAutoActionTimer();
     resetAutoCombatState();
@@ -1076,6 +1381,7 @@ function enterDeadState() {
 
 function exitToExploreState() {
     window.isCombat = false;
+    clearCombatTurnPrefetch();
     clearCombatTimer();
     resetAutoCombatState();
     document.body.classList.remove('boss-bg');
@@ -1096,6 +1402,7 @@ function enterEncounterState(mobName, mobMaxHp) {
 
 function enterCombatState(mobName, mobMaxHp) {
     window.isCombat = true;
+    clearCombatTurnPrefetch();
     clearAutoActionTimer();
     resetAutoCombatState();
     if (!window.currentMobHp || window.currentMobHp <= 0) window.currentMobHp = mobMaxHp;
@@ -1124,6 +1431,7 @@ function disableAutoCombatMode(logMessage = '') {
     const wasEnabled = isAutoMode;
     if (toggle) toggle.checked = false;
     isAutoMode = false;
+    clearCombatTurnPrefetch();
     updateAutoCombatModeUI();
     if (wasEnabled && logMessage) addLog(logMessage, true);
 }
@@ -1132,7 +1440,16 @@ function toggleAutoMode() {
     const toggle = document.getElementById('auto-combat-toggle');
     if (!toggle) return;
 
+    if (isProcessingTurn) {
+        toggle.checked = isAutoMode;
+        addLog('⏳ 턴 진행 중에는 자동 전투를 변경할 수 없습니다.', true);
+        return;
+    }
+
     isAutoMode = toggle.checked;
+    if (!isAutoMode) {
+        clearCombatTurnPrefetch();
+    }
     if (isAutoMode && window.isCombat && isBossAutoCombatRestricted(window.currentMobName || '')) {
         disableAutoCombatMode('⛔ 10층 보스전에서는 자동 전투를 사용할 수 없습니다. 수동 전투로 진행해 주세요.');
         return;
@@ -1177,9 +1494,10 @@ async function doCombatTurn() {
     if (isProcessingTurn || !window.isCombat || window.battleStage !== BATTLE_STAGE.COMBAT) return;
     isProcessingTurn = true;
     let continueAutoCombat = false;
-    const data = await callApi('combat');
+    const data = await getCombatTurnData();
     if (data) {
         if (data.status === 'error') {
+            clearCombatTurnPrefetch();
             if (data.msg && data.msg.includes('대치')) {
                 enterCombatState(window.currentMobName || '정체불명의 적', window.currentMobMaxHp || 1);
                 addLog(data.msg, true);
@@ -1200,70 +1518,52 @@ async function doCombatTurn() {
             window.currentMobMaxHp = nextMobMaxHp;
             applyRewardUi(data);
 
+            queueNextAutoCombatPrefetch(data, {
+                hp: nextPlayerHp,
+                maxHp: nextPlayerMaxHp,
+                mp: nextPlayerMp,
+                disposition: getCommanderDisposition(),
+            });
+
                 if (data.stream) {
-                    const logBox = document.getElementById('game-log');
-                    const streamLog = document.createElement('div');
-                    streamLog.className = 'log-entry system';
-                    streamLog.innerHTML = "<span class='turn-script-header' style='color:#ff5252; font-weight:bold;'></span><br><span class='turn-script-lines'></span><span class='stream-text'></span>";
-                    logBox.appendChild(streamLog);
-
-                    const textSpan = streamLog.querySelector('.stream-text');
-                    if (textSpan) textSpan.style.whiteSpace = 'pre-wrap';
-
-                    // 턴 스크립트 표시와 동시에 SSE 백그라운드 프리페치 시작
-                    let sseBuffer = '';
-                    let sseLogAppends = [];
-                    let sseDone = false;
-                    const source = new EventSource('api.php?action=stream_combat_ai');
-                    source.onmessage = function(event) {
-                        if (event.data === '[DONE]') { source.close(); sseDone = true; return; }
-                        try {
-                            const chunk = JSON.parse(event.data);
-                            if (chunk.text) sseBuffer += chunk.text;
-                            if (chunk.log_append) sseLogAppends.push(chunk.log_append);
-                        } catch(e) {}
-                    };
-                    source.onerror = function() { source.close(); sseDone = true; };
-
-                    // 턴 스크립트(데미지) 애니메이션 출력
-                    const headerEl = streamLog.querySelector('.turn-script-header');
-                    if (headerEl) {
-                        headerEl.textContent = '';
-                        await typeText(headerEl, '[전투 스크립트 ✨]', 7);
-                    }
-                    await renderTurnScriptBlock(streamLog, data, {
-                        syncMonsterHp: true,
-                        syncPlayerHp: true,
-                        initialMobHp: currentMobHpBeforeTurn,
-                        finalMobHp: nextMobHp,
-                        mobMaxHp: nextMobMaxHp,
-                        initialPlayerHp: currentPlayerHpBeforeTurn,
-                        finalPlayerHp: nextPlayerHp,
-                        playerMaxHp: nextPlayerMaxHp,
-                        finalPlayerMp: nextPlayerMp,
-                        playerMaxMp: nextPlayerMaxMp,
-                    });
-                    logBox.scrollTop = logBox.scrollHeight;
-
-                    // 턴 스크립트 완료 후 버퍼된 SSE 내용을 즉시 이어붙이고, 미완료면 폴링 대기
-                    let displayedIdx = 0;
-                    while (!sseDone || displayedIdx < sseBuffer.length) {
-                        if (displayedIdx < sseBuffer.length) {
-                            if (textSpan) textSpan.textContent += sseBuffer.slice(displayedIdx);
-                            displayedIdx = sseBuffer.length;
-                            while (sseLogAppends.length > 0) {
-                                streamLog.innerHTML += '<br>' + sseLogAppends.shift();
+                    await renderCenterScriptMessage({
+                        title: '[전투 스크립트 ✨]',
+                        renderBody: async (targetEl) => {
+                            await renderTurnScriptBlock(targetEl, data, {
+                                syncMonsterHp: true,
+                                syncPlayerHp: true,
+                                initialMobHp: currentMobHpBeforeTurn,
+                                finalMobHp: nextMobHp,
+                                mobMaxHp: nextMobMaxHp,
+                                initialPlayerHp: currentPlayerHpBeforeTurn,
+                                finalPlayerHp: nextPlayerHp,
+                                playerMaxHp: nextPlayerMaxHp,
+                                finalPlayerMp: nextPlayerMp,
+                                playerMaxMp: nextPlayerMaxMp,
+                            });
+                        },
+                        streamUrl: 'api.php?action=stream_combat_ai',
+                        perCharDelay: 12,
+                        onLogAppend: (logAppend) => {
+                            if (!logAppend) return;
+                            const logBox = document.getElementById('game-log');
+                            if (!logBox) return;
+                            const extraLine = document.createElement('div');
+                            extraLine.className = 'turn-script-line';
+                            extraLine.textContent = toPlainLogText(logAppend);
+                            const currentBlock = logBox.lastElementChild;
+                            if (currentBlock) {
+                                const linesEl = currentBlock.querySelector('.turn-script-lines');
+                                if (linesEl) linesEl.appendChild(extraLine);
                             }
-                            logBox.scrollTop = logBox.scrollHeight;
-                        }
-                        if (!sseDone) await wait(7);
-                    }
+                        },
+                    });
 
                     advanceAutoCombatState('attack');
                     isProcessingTurn = false;
-                    if (data.status === 'victory') { exitToExploreState(); toggleEquip(0, -1); }
-                    else if (data.status === 'defeat') { enterDeadState(); }
-                    else if (isAutoMode) { scheduleAutoCombatAction(500); }
+                    if (data.status === 'victory') { clearCombatTurnPrefetch(); exitToExploreState(); toggleEquip(0, -1); }
+                    else if (data.status === 'defeat') { clearCombatTurnPrefetch(); enterDeadState(); }
+                    else if (isAutoMode) { scheduleAutoCombatAction(getAutoCombatPostTurnDelay()); }
                     return; // 완료
                 } else {
                     await addTurnDamageBreakdown(data, {
@@ -1279,20 +1579,64 @@ async function doCombatTurn() {
                         playerMaxMp: nextPlayerMaxMp,
                     });
                     if (Array.isArray(data.logs)) {
-                        for (const log of data.logs) addLog(log);
+                        for (const log of data.logs) {
+                            if (typeof log === 'string' && log.includes('턴 지표')) {
+                                const tempDiv = document.createElement('div');
+                                tempDiv.innerHTML = log;
+                                const textContent = tempDiv.textContent || tempDiv.innerText || "";
+                                const headerMatch = textContent.match(/\[.*?턴 지표\]/);
+                                const header = headerMatch ? headerMatch[0] : "전투 요약";
+                                const dataPart = textContent.replace(/📊\s*\[.*?턴 지표\]\s*/, '').trim();
+                                const metrics = dataPart.split('|').map(m => m.trim());
+                                const metricsHtml = metrics.map(metric => {
+                                    const parts = metric.split(' ');
+                                    if (parts.length < 2) return `<span>${metric}</span>`;
+                                    const value = parts.pop();
+                                    const label = parts.join(' ');
+                                    return `<span style="margin-right: 16px; white-space: nowrap;"><span style="color: #bdbdbd;">${label}</span> <strong style="color: #fff; font-weight:bold;">${value}</strong></span>`;
+                                }).join('');
+                                const reportHtml = `
+                                    <div style="border: 1px solid #7e57c2; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(40, 30, 55, 0.5), rgba(30, 35, 45, 0.5)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
+                                        <div style="font-weight: bold; color: #d1c4e9; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #555;">📊 ${header}</div>
+                                        <div style="display: flex; flex-wrap: wrap; gap: 8px 0px; font-size: 0.9em; line-height: 1.6;">
+                                            ${metricsHtml}
+                                        </div>
+                                    </div>`;
+                                addLog(reportHtml, true);
+                            } else if (typeof log === 'string' && (log.includes('전투 보상') || log.includes('🎖️'))) {
+                                const tempDiv = document.createElement('div');
+                                tempDiv.innerHTML = log;
+                                const textContent = tempDiv.textContent || tempDiv.innerText || "";
+
+                                const parts = textContent.replace('🎖️', '').trim().split(':');
+                                const title = parts[0] || "전투 보상";
+                                const details = (parts.length > 1 ? parts[1].trim() : '').replace(/, /g, '<span style="margin:0 8px; color:#777;">|</span>');
+
+                                const rewardHtml = `
+                                <div style="border: 1px solid #ffd54f; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(60, 50, 26, 0.6), rgba(45, 40, 30, 0.6)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
+                                    <div style="font-weight: bold; color: #ffecb3; margin-bottom: 8px; font-size: 1.05em;">🎖️ ${title}</div>
+                                    <div style="font-size: 1em; color: #fff;"><strong>${details}</strong></div>
+                                </div>`;
+                                addLog(rewardHtml, true);
+                            } else {
+                                addLog(log);
+                            }
+                        }
                     }
                     advanceAutoCombatState('attack');
-                    if (data.status === 'victory') { exitToExploreState(); toggleEquip(0, -1); } 
-                    else if (data.status === 'defeat') { enterDeadState(); } 
+                    if (data.status === 'victory') { clearCombatTurnPrefetch(); exitToExploreState(); toggleEquip(0, -1); } 
+                    else if (data.status === 'defeat') { clearCombatTurnPrefetch(); enterDeadState(); } 
                     else if (isAutoMode) { continueAutoCombat = true; }
                 }
         }
     }
         if (!data || !data.stream) isProcessingTurn = false;
-        if (continueAutoCombat) scheduleAutoCombatAction(500);
+        if (!data) clearCombatTurnPrefetch();
+        if (continueAutoCombat) scheduleAutoCombatAction(getAutoCombatPostTurnDelay());
 }
 
 async function attemptFlee() {
+    clearCombatTurnPrefetch();
     const data = await callApi('flee');
     if (data) {
         addLog(data.log);
@@ -1353,6 +1697,14 @@ async function sendAction(actionType) {
         const data = await callApi(actionType, {method: 'POST'});
         
         if(data) {
+            if (!data.stream) {
+                const logBox = document.getElementById('game-log');
+                const pendingLog = logBox ? logBox.lastElementChild : null;
+                const pendingText = pendingLog ? String(pendingLog.dataset.plainText || pendingLog.textContent || '') : '';
+                if (pendingLog && pendingText.includes('(결과 계산 중)')) {
+                    logBox.removeChild(pendingLog);
+                }
+            }
             if (actionType === 'action') {
                 if (data.story_event) showStoryModal(data.story_event);
                 if (data.status === 'encounter' || data.status === 'safe') {
@@ -1368,53 +1720,9 @@ async function sendAction(actionType) {
                             for (const line of data.levelup_logs) addLog(line, true);
                         }
                     }
-                    if (data.stream) {
-                        isStreamInProgress = true;
-                        const logBox = document.getElementById('game-log');
-                        const lastLog = logBox.lastElementChild;
-                        if (lastLog && (lastLog.innerText.includes('AI 묘사 대기 중') || lastLog.innerText.includes('결과 계산 중'))) {
-                            logBox.removeChild(lastLog);
-                        }
-
-                        if (data.event_title && data.event_type) {
-                            const typeLabel = formatEventTypeLabel(data.event_type);
-                            addLog(`🧭 <b style='color:#b39ddb;'>[${data.event_title}]</b> (${typeLabel})`, true);
-                        }
-
-                        const streamLog = document.createElement('div');
-                        streamLog.className = 'log-entry system';
-                        streamLog.innerHTML = "<span class='stream-badge' style='color:#00d8ff; font-weight:bold;'>[AI ✨]</span><br><span class='stream-text'></span>";
-                        logBox.appendChild(streamLog);
-                        logBox.scrollTop = logBox.scrollHeight;
-                        const textSpan = streamLog.querySelector('.stream-text');
-                        const badgeSpan = streamLog.querySelector('.stream-badge');
-
-                        const source = new EventSource('api.php?action=stream_ai');
-                        source.onmessage = function(event) {
-                            if (event.data === '[DONE]') {
-                                source.close();
-                                if (data.status === 'encounter') enterEncounterState(data.mob_name, data.mob_max_hp);
-                                finalizeActionState(true);
-                                return;
-                            }
-                            const chunk = JSON.parse(event.data);
-                            if (chunk.meta && badgeSpan) {
-                                badgeSpan.innerText = formatAiBadge(chunk.meta);
-                            }
-                            if (chunk.text) textSpan.textContent += chunk.text;
-                            if (chunk.log_append) streamLog.innerHTML += "<br>" + chunk.log_append;
-                            logBox.scrollTop = logBox.scrollHeight;
-                        };
-                        source.onerror = function() {
-                            source.close();
-                            if (data.status === 'encounter') enterEncounterState(data.mob_name, data.mob_max_hp);
-                            finalizeActionState(true);
-                        };
-                    } else {
-                        if (data.log) addLog(data.log);
-                        if (data.status === 'encounter') enterEncounterState(data.mob_name, data.mob_max_hp);
-                        shouldRescheduleAutomation = true;
-                    }
+                    if (data.log) addLog(data.log);
+                    if (data.status === 'encounter') enterEncounterState(data.mob_name, data.mob_max_hp);
+                    shouldRescheduleAutomation = true;
                     } else if (data.status === 'auto_advance') {
                         if (data.new_floor !== undefined) updateFloorDisplay(data.new_floor, data.new_max_floor);
                         updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);
@@ -1491,6 +1799,7 @@ async function useSkill(skillId) {
     if (isProcessingTurn) { addLog('⏳ 턴을 기다리는 중입니다.'); return; }
     const wasCombat = Boolean(window.isCombat && window.battleStage === BATTLE_STAGE.COMBAT);
     let continueAutoCombat = false;
+    clearCombatTurnPrefetch();
     isProcessingTurn = true;
     const formData = new URLSearchParams();
     formData.append('skill_id', skillId);
@@ -1501,9 +1810,63 @@ async function useSkill(skillId) {
             if (wasCombat && isAutoMode) continueAutoCombat = true;
         }
         else {
-            if (Array.isArray(data.logs)) {
-                for (const log of data.logs) {
-                    addLog(log); await wait(400);
+                    if (wasCombat && data.stream) {
+                        // SSE 요청 전 세션 저장 시간 확보
+                        await wait(50);
+
+                        await renderCenterScriptMessage({
+                            title: '[전투 스크립트 ✨]',
+                            renderBody: async (targetEl) => {
+                                await renderPlainLogBlock(targetEl, data.logs, 'skill-log');
+                            },
+                            streamUrl: 'api.php?action=stream_combat_ai',
+                            perCharDelay: 12,
+                        });
+            } else {
+                if (Array.isArray(data.logs)) {
+                    for (const log of data.logs) {
+						if (typeof log === 'string' && log.includes('턴 지표')) {
+							const tempDiv = document.createElement('div');
+							tempDiv.innerHTML = log;
+							const textContent = tempDiv.textContent || tempDiv.innerText || "";
+							const headerMatch = textContent.match(/\[.*?턴 지표\]/);
+							const header = headerMatch ? headerMatch[0] : "전투 요약";
+							const dataPart = textContent.replace(/📊\s*\[.*?턴 지표\]\s*/, '').trim();
+							const metrics = dataPart.split('|').map(m => m.trim());
+							const metricsHtml = metrics.map(metric => {
+								const parts = metric.split(' ');
+								if (parts.length < 2) return `<span>${metric}</span>`;
+								const value = parts.pop();
+								const label = parts.join(' ');
+								return `<span style="margin-right: 16px; white-space: nowrap;"><span style="color: #bdbdbd;">${label}</span> <strong style="color: #fff; font-weight:bold;">${value}</strong></span>`;
+							}).join('');
+							const reportHtml = `
+								<div style="border: 1px solid #7e57c2; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(40, 30, 55, 0.5), rgba(30, 35, 45, 0.5)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
+									<div style="font-weight: bold; color: #d1c4e9; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #555;">📊 ${header}</div>
+									<div style="display: flex; flex-wrap: wrap; gap: 8px 0px; font-size: 0.9em; line-height: 1.6;">
+										${metricsHtml}
+									</div>
+								</div>`;
+							addLog(reportHtml, true);
+						} else if (typeof log === 'string' && (log.includes('전투 보상') || log.includes('🎖️'))) {
+							const tempDiv = document.createElement('div');
+							tempDiv.innerHTML = log;
+							const textContent = tempDiv.textContent || tempDiv.innerText || "";
+
+							const parts = textContent.replace('🎖️', '').trim().split(':');
+							const title = parts[0] || "전투 보상";
+							const details = (parts.length > 1 ? parts[1].trim() : '').replace(/, /g, '<span style="margin:0 8px; color:#777;">|</span>');
+
+							const rewardHtml = `
+							<div style="border: 1px solid #ffd54f; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(60, 50, 26, 0.6), rgba(45, 40, 30, 0.6)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
+								<div style="font-weight: bold; color: #ffecb3; margin-bottom: 8px; font-size: 1.05em;">🎖️ ${title}</div>
+								<div style="font-size: 1em; color: #fff;"><strong>${details}</strong></div>
+							</div>`;
+							addLog(rewardHtml, true);
+						} else {
+							await addTypedLogLine(log, true);
+						}
+                    }
                 }
             }
             updatePlayerBars(data.new_hp, data.max_hp, data.new_mp, data.max_mp);

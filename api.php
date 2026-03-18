@@ -130,12 +130,23 @@ function normalize_ai_output($text) {
 	}
 
 	// 불필요한 마크다운/접두어 제거
+	$t = str_replace(array("\r\n", "\r"), "\n", $t);
 	$t = preg_replace('/^\s*#{1,6}\s*/um', '', $t);
 	$t = str_replace(array('**', '__'), '', $t);
 	$t = preg_replace('/^\s*>\s*/um', '', $t);
+	$t = preg_replace('/<\s*br\s*\/?>/iu', "\n", $t);
+	$t = preg_replace('/<\s*\/\s*(p|div|li)\s*>/iu', "\n", $t);
 	$t = strip_tags($t);
 	$t = html_entity_decode($t, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-	$t = preg_replace('/\s+/u', ' ', $t);
+	$lines = preg_split('/\n/u', $t);
+	if (is_array($lines)) {
+		foreach ($lines as &$line) {
+			$line = trim((string)preg_replace('/[ \t]+/u', ' ', (string)$line));
+		}
+		unset($line);
+		$t = implode("\n", $lines);
+	}
+	$t = preg_replace('/\n{3,}/u', "\n\n", $t);
 	return trim($t);
 }
 
@@ -3555,6 +3566,7 @@ function handle_skill(PDO $pdo) {
 		$cmd = $st->fetch();
 		if (!$cmd) throw new Exception('유저 정보 없음');
 		$is_in_combat = ((int)$cmd['is_combat'] === 1);
+		$was_in_combat_at_start = $is_in_combat;
 		if ((int)$cmd['hp'] <= 0) throw new Exception('사망 상태에서는 스킬을 사용할 수 없습니다.');
 		if (!$is_in_combat && $skill_id !== 'heal') throw new Exception('힐은 비전투 중에도 사용할 수 있지만, 해당 스킬은 전투 중에만 사용 가능합니다.');
 
@@ -3905,9 +3917,15 @@ function handle_skill(PDO $pdo) {
 		if ($new_hp <= 0) {
 			reset_orc_frenzy_state();
 		}
+		if ($was_in_combat_at_start) {
+			$final_log = implode('<br>', $logs);
+			$stream_seed = html_log_to_plain_text($final_log);
+			$_SESSION['combat_stream_text'] = $stream_seed;
+		}
 		$pdo->commit();
 		echo json_encode(array(
 			'status' => 'success',
+			'stream' => $was_in_combat_at_start ? true : false,
 			'logs' => $logs,
 			'is_combat' => $is_in_combat,
 			'new_hp' => $new_hp,
@@ -5192,6 +5210,12 @@ function handle_stream_combat_ai(PDO $pdo) {
 	$ai = request_ai_text_with_fallback($combat_seed, false, 'combat');
 	$ai_text = is_array($ai) ? (string)$ai['text'] : (string)$ai;
 	$meta = is_array($ai) ? array('provider' => $ai['provider'], 'model' => $ai['model']) : array('provider' => 'raw', 'model' => 'unknown');
+	if (
+		(isset($meta['provider']) && strtolower((string)$meta['provider']) === 'raw') ||
+		(isset($meta['model']) && strtolower((string)$meta['model']) === 'local-fallback')
+	) {
+		$ai_text = '';
+	}
 	stream_text_as_sse($ai_text, 7000, $meta, 1, 1);
 	echo "data: [DONE]\n\n";
 	@ob_flush(); @flush();
@@ -5368,7 +5392,7 @@ switch ($action) {
 	case 'combat': handle_combat($pdo); break;
 	case 'combine': handle_combine($pdo); break;
 	case 'equip': handle_equip($pdo); break;
-	case 'stream_ai': handle_stream_ai($pdo); break;
+	case 'stream_ai': json_error('탐색 AI는 비활성화되었습니다.'); break;
 	case 'stream_combat_ai': handle_stream_combat_ai($pdo); break;
 	case 'stream_story_ai': handle_stream_story_ai($pdo); break;
 	case 'ranking': handle_ranking($pdo); break;
