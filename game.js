@@ -665,43 +665,7 @@ function projectAutoCombatStateAfterAction(state, skillId = '') {
 }
 
 function chooseAutoCombatActionFromSnapshot(snapshot = {}) {
-    const hp = Math.max(0, Number(snapshot.hp || 0));
-    const maxHp = Math.max(1, Number(snapshot.maxHp || 1));
-    const mp = Math.max(0, Number(snapshot.mp || 0));
-    const disposition = clampDispositionValue(snapshot.disposition !== undefined ? snapshot.disposition : getCommanderDisposition());
-    const hpRatio = hp / maxHp;
-    const state = (snapshot.state && typeof snapshot.state === 'object') ? snapshot.state : ensureAutoCombatState();
-    const shieldActive = Number(state.shieldUpTurns || 0) > 0;
-    const berserkActive = Number(state.berserkTurns || 0) > 0;
-
-    const canHeal = mp >= 30 && hp < maxHp;
-    const canThunder = mp >= 28;
-    const canFireball = mp >= 25;
-    const canShield = !shieldActive;
-    const canBerserk = !berserkActive && hpRatio >= 0.55 && hp > Math.max(15, Math.floor(maxHp * 0.18));
-
-    if (disposition >= 80) {
-        if (canBerserk) return 'berserk';
-        if (canThunder) return 'thunder_bolt';
-        if (canFireball) return 'fireball';
-        if (hpRatio <= 0.18 && canHeal) return 'heal';
-        if (hpRatio <= 0.28 && canShield) return 'shield_up';
-        return 'attack';
-    }
-
-    if (disposition <= 20) {
-        if (hpRatio <= 0.92 && canHeal) return 'heal';
-        if (hpRatio <= 0.98 && canShield) return 'shield_up';
-        if (canThunder && hpRatio >= 0.95) return 'thunder_bolt';
-        if (canFireball && hpRatio >= 0.90) return 'fireball';
-        return 'attack';
-    }
-
-    if (hpRatio <= 0.35 && canHeal) return 'heal';
-    if (hpRatio <= 0.55 && canShield) return 'shield_up';
-    if (canBerserk) return 'berserk';
-    if (canThunder && hpRatio >= 0.45) return 'thunder_bolt';
-    if (canFireball && hpRatio >= 0.35) return 'fireball';
+    // 자동전투에서는 일반 공격만 수행
     return 'attack';
 }
 
@@ -1559,12 +1523,69 @@ async function doCombatTurn() {
                         },
                     });
 
+                    // 10턴 지표, 전투 보상 처리
+                    if (Array.isArray(data.logs)) {
+                        for (const log of data.logs) {
+                            if (typeof log === 'string' && log.includes('턴 지표')) {
+                                const tempDiv = document.createElement('div');
+                                tempDiv.innerHTML = log;
+                                const textContent = tempDiv.textContent || tempDiv.innerText || "";
+                                const headerMatch = textContent.match(/\[.*?턴 지표\]/);
+                                const header = headerMatch ? headerMatch[0] : "전투 요약";
+                                const dataPart = textContent.replace(/📊\s*\[.*?턴 지표\]\s*/, '').trim();
+                                const metrics = dataPart.split('|').map(m => m.trim());
+                                const metricsHtml = metrics.map(metric => {
+                                    const parts = metric.split(' ');
+                                    if (parts.length < 2) return `<span>${metric}</span>`;
+                                    const value = parts.pop();
+                                    const label = parts.join(' ');
+                                    return `<span style="margin-right: 16px; white-space: nowrap;"><span style="color: #bdbdbd;">${label}</span> <strong style="color: #fff; font-weight:bold;">${value}</strong></span>`;
+                                }).join('');
+                                const reportHtml = `
+                                    <div style="border: 1px solid #7e57c2; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(40, 30, 55, 0.5), rgba(30, 35, 45, 0.5)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
+                                        <div style="font-weight: bold; color: #d1c4e9; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #555;">📊 ${header}</div>
+                                        <div style="display: flex; flex-wrap: wrap; gap: 8px 0px; font-size: 0.9em; line-height: 1.6;">
+                                            ${metricsHtml}
+                                        </div>
+                                    </div>`;
+                                const logBox = document.getElementById('game-log');
+                                if (logBox) {
+                                    const newLog = document.createElement('div');
+                                    newLog.className = 'log-entry system';
+                                    newLog.innerHTML = reportHtml;
+                                    logBox.appendChild(newLog);
+                                    logBox.scrollTop = logBox.scrollHeight;
+                                }
+                            } else if (typeof log === 'string' && (log.includes('전투 보상') || log.includes('🎖️'))) {
+                                const tempDiv = document.createElement('div');
+                                tempDiv.innerHTML = log;
+                                const textContent = tempDiv.textContent || tempDiv.innerText || "";
+                                const parts = textContent.replace('🎖️', '').trim().split(':');
+                                const title = parts[0] || "전투 보상";
+                                const details = (parts.length > 1 ? parts[1].trim() : '').replace(/, /g, '<span style="margin:0 8px; color:#777;">|</span>');
+                                const rewardHtml = `
+                                <div style="border: 1px solid #ffd54f; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(60, 50, 26, 0.6), rgba(45, 40, 30, 0.6)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
+                                    <div style="font-weight: bold; color: #ffecb3; margin-bottom: 8px; font-size: 1.05em;">🎖️ ${title}</div>
+                                    <div style="font-size: 1em; color: #fff;"><strong>${details}</strong></div>
+                                </div>`;
+                                const logBox = document.getElementById('game-log');
+                                if (logBox) {
+                                    const newLog = document.createElement('div');
+                                    newLog.className = 'log-entry system';
+                                    newLog.innerHTML = rewardHtml;
+                                    logBox.appendChild(newLog);
+                                    logBox.scrollTop = logBox.scrollHeight;
+                                }
+                            }
+                        }
+                    }
+
                     advanceAutoCombatState('attack');
                     isProcessingTurn = false;
                     if (data.status === 'victory') { clearCombatTurnPrefetch(); exitToExploreState(); toggleEquip(0, -1); }
                     else if (data.status === 'defeat') { clearCombatTurnPrefetch(); enterDeadState(); }
                     else if (isAutoMode) { scheduleAutoCombatAction(getAutoCombatPostTurnDelay()); }
-                    return; // 완료
+                    return;
                 } else {
                     await addTurnDamageBreakdown(data, {
                         syncMonsterHp: true,
@@ -1602,22 +1623,34 @@ async function doCombatTurn() {
                                             ${metricsHtml}
                                         </div>
                                     </div>`;
-                                addLog(reportHtml, true);
+                                const logBox = document.getElementById('game-log');
+                                if (logBox) {
+                                    const newLog = document.createElement('div');
+                                    newLog.className = 'log-entry system';
+                                    newLog.innerHTML = reportHtml;
+                                    logBox.appendChild(newLog);
+                                    logBox.scrollTop = logBox.scrollHeight;
+                                }
                             } else if (typeof log === 'string' && (log.includes('전투 보상') || log.includes('🎖️'))) {
                                 const tempDiv = document.createElement('div');
                                 tempDiv.innerHTML = log;
                                 const textContent = tempDiv.textContent || tempDiv.innerText || "";
-
                                 const parts = textContent.replace('🎖️', '').trim().split(':');
                                 const title = parts[0] || "전투 보상";
                                 const details = (parts.length > 1 ? parts[1].trim() : '').replace(/, /g, '<span style="margin:0 8px; color:#777;">|</span>');
-
                                 const rewardHtml = `
                                 <div style="border: 1px solid #ffd54f; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(60, 50, 26, 0.6), rgba(45, 40, 30, 0.6)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
                                     <div style="font-weight: bold; color: #ffecb3; margin-bottom: 8px; font-size: 1.05em;">🎖️ ${title}</div>
                                     <div style="font-size: 1em; color: #fff;"><strong>${details}</strong></div>
                                 </div>`;
-                                addLog(rewardHtml, true);
+                                const logBox = document.getElementById('game-log');
+                                if (logBox) {
+                                    const newLog = document.createElement('div');
+                                    newLog.className = 'log-entry system';
+                                    newLog.innerHTML = rewardHtml;
+                                    logBox.appendChild(newLog);
+                                    logBox.scrollTop = logBox.scrollHeight;
+                                }
                             } else {
                                 addLog(log);
                             }
@@ -1822,6 +1855,63 @@ async function useSkill(skillId) {
                             streamUrl: 'api.php?action=stream_combat_ai',
                             perCharDelay: 12,
                         });
+
+                        // 10턴 지표, 전투 보상 처리
+                        if (Array.isArray(data.logs)) {
+                            for (const log of data.logs) {
+                                if (typeof log === 'string' && log.includes('턴 지표')) {
+                                    const tempDiv = document.createElement('div');
+                                    tempDiv.innerHTML = log;
+                                    const textContent = tempDiv.textContent || tempDiv.innerText || "";
+                                    const headerMatch = textContent.match(/\[.*?턴 지표\]/);
+                                    const header = headerMatch ? headerMatch[0] : "전투 요약";
+                                    const dataPart = textContent.replace(/📊\s*\[.*?턴 지표\]\s*/, '').trim();
+                                    const metrics = dataPart.split('|').map(m => m.trim());
+                                    const metricsHtml = metrics.map(metric => {
+                                        const parts = metric.split(' ');
+                                        if (parts.length < 2) return `<span>${metric}</span>`;
+                                        const value = parts.pop();
+                                        const label = parts.join(' ');
+                                        return `<span style="margin-right: 16px; white-space: nowrap;"><span style="color: #bdbdbd;">${label}</span> <strong style="color: #fff; font-weight:bold;">${value}</strong></span>`;
+                                    }).join('');
+                                    const reportHtml = `
+                                        <div style="border: 1px solid #7e57c2; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(40, 30, 55, 0.5), rgba(30, 35, 45, 0.5)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
+                                            <div style="font-weight: bold; color: #d1c4e9; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #555;">📊 ${header}</div>
+                                            <div style="display: flex; flex-wrap: wrap; gap: 8px 0px; font-size: 0.9em; line-height: 1.6;">
+                                                ${metricsHtml}
+                                            </div>
+                                        </div>`;
+                                    const logBox = document.getElementById('game-log');
+                                    if (logBox) {
+                                        const newLog = document.createElement('div');
+                                        newLog.className = 'log-entry system';
+                                        newLog.innerHTML = reportHtml;
+                                        logBox.appendChild(newLog);
+                                        logBox.scrollTop = logBox.scrollHeight;
+                                    }
+                                } else if (typeof log === 'string' && (log.includes('전투 보상') || log.includes('🎖️'))) {
+                                    const tempDiv = document.createElement('div');
+                                    tempDiv.innerHTML = log;
+                                    const textContent = tempDiv.textContent || tempDiv.innerText || "";
+                                    const parts = textContent.replace('🎖️', '').trim().split(':');
+                                    const title = parts[0] || "전투 보상";
+                                    const details = (parts.length > 1 ? parts[1].trim() : '').replace(/, /g, '<span style="margin:0 8px; color:#777;">|</span>');
+                                    const rewardHtml = `
+                                    <div style="border: 1px solid #ffd54f; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(60, 50, 26, 0.6), rgba(45, 40, 30, 0.6)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
+                                        <div style="font-weight: bold; color: #ffecb3; margin-bottom: 8px; font-size: 1.05em;">🎖️ ${title}</div>
+                                        <div style="font-size: 1em; color: #fff;"><strong>${details}</strong></div>
+                                    </div>`;
+                                    const logBox = document.getElementById('game-log');
+                                    if (logBox) {
+                                        const newLog = document.createElement('div');
+                                        newLog.className = 'log-entry system';
+                                        newLog.innerHTML = rewardHtml;
+                                        logBox.appendChild(newLog);
+                                        logBox.scrollTop = logBox.scrollHeight;
+                                    }
+                                }
+                            }
+                        }
             } else {
                 if (Array.isArray(data.logs)) {
                     for (const log of data.logs) {
@@ -1847,22 +1937,34 @@ async function useSkill(skillId) {
 										${metricsHtml}
 									</div>
 								</div>`;
-							addLog(reportHtml, true);
+							const logBox = document.getElementById('game-log');
+							if (logBox) {
+								const newLog = document.createElement('div');
+								newLog.className = 'log-entry system';
+								newLog.innerHTML = reportHtml;
+								logBox.appendChild(newLog);
+								logBox.scrollTop = logBox.scrollHeight;
+							}
 						} else if (typeof log === 'string' && (log.includes('전투 보상') || log.includes('🎖️'))) {
 							const tempDiv = document.createElement('div');
 							tempDiv.innerHTML = log;
 							const textContent = tempDiv.textContent || tempDiv.innerText || "";
-
 							const parts = textContent.replace('🎖️', '').trim().split(':');
 							const title = parts[0] || "전투 보상";
 							const details = (parts.length > 1 ? parts[1].trim() : '').replace(/, /g, '<span style="margin:0 8px; color:#777;">|</span>');
-
 							const rewardHtml = `
 							<div style="border: 1px solid #ffd54f; border-radius: 8px; padding: 12px; margin: 8px 4px; background: linear-gradient(145deg, rgba(60, 50, 26, 0.6), rgba(45, 40, 30, 0.6)); box-shadow: 0 3px 10px rgba(0,0,0,0.3);">
 								<div style="font-weight: bold; color: #ffecb3; margin-bottom: 8px; font-size: 1.05em;">🎖️ ${title}</div>
 								<div style="font-size: 1em; color: #fff;"><strong>${details}</strong></div>
 							</div>`;
-							addLog(rewardHtml, true);
+							const logBox = document.getElementById('game-log');
+							if (logBox) {
+								const newLog = document.createElement('div');
+								newLog.className = 'log-entry system';
+								newLog.innerHTML = rewardHtml;
+								logBox.appendChild(newLog);
+								logBox.scrollTop = logBox.scrollHeight;
+							}
 						} else {
 							await addTypedLogLine(log, true);
 						}

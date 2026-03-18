@@ -414,7 +414,11 @@ function append_balance_metrics_log(&$logs, $turn_damage, $incoming_damage, $hp_
 	$avg_orc = (int)round($sum_orc / $count);
 
 	if (is_array($logs)) {
-		$logs[] = "📊 <span style='color:#b39ddb;'>[10턴 지표]</span> 평균 딜 {$avg_dmg} | 평균 피격 {$avg_in} | 순HP {$avg_hp} | MP 수지 {$avg_mp} | 첫타 {$avg_first}% | 오크 {$avg_orc}%";
+		$log_line = "📊 <span style='color:#b39ddb;'>[10턴 지표]</span> 평균 딜 {$avg_dmg} | 평균 피격 {$avg_in} | 순HP {$avg_hp} | MP 수지 {$avg_mp} | 첫타 {$avg_first}%";
+		if ($avg_orc > 0) {
+			$log_line .= " | 오크 광분 {$avg_orc}%";
+		}
+		$logs[] = $log_line;
 	}
 }
 
