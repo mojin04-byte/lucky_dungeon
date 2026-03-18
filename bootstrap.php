@@ -196,6 +196,21 @@ try {
     if (!column_exists($pdo, 'tb_commanders', 'intro_story_seen')) {
         $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `intro_story_seen` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '시작 서사 연출 확인 여부'");
     }
+    if (!column_exists($pdo, 'tb_commanders', 'reincarnation_count')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `reincarnation_count` INT NOT NULL DEFAULT 0 COMMENT '환생 횟수'");
+    }
+    if (!column_exists($pdo, 'tb_commanders', 'lifetime_gold_earned')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `lifetime_gold_earned` BIGINT NOT NULL DEFAULT 0 COMMENT '누적 획득 골드'");
+    }
+    if (!column_exists($pdo, 'tb_commanders', 'reincarnation_level_total')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `reincarnation_level_total` INT NOT NULL DEFAULT 0 COMMENT '환생 누적 레벨 합계'");
+    }
+    if (!column_exists($pdo, 'tb_commanders', 'reincarnation_stat_bonus')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `reincarnation_stat_bonus` INT NOT NULL DEFAULT 0 COMMENT '환생 누적 스탯 보너스'");
+    }
+    if (column_exists($pdo, 'tb_commanders', 'lifetime_gold_earned')) {
+        $pdo->exec("UPDATE `tb_commanders` SET `lifetime_gold_earned` = GREATEST(`lifetime_gold_earned`, `gold`) WHERE `lifetime_gold_earned` = 0 AND `gold` > 0");
+    }
 
     // 토벌대 메인 테이블
     if (!table_exists($pdo, 'tb_expeditions')) {
@@ -255,7 +270,7 @@ define('GEMINI_API_KEY', getenv('GEMINI_API_KEY'));
 
 // Gemini API URL
 $gemini_key = getenv('GEMINI_API_KEY');
-$gemini_model = getenv('GEMINI_MODEL') ?: 'gemini-2.5-flash-lite';
+$gemini_model = getenv('GEMINI_MODEL') ?: 'GEMINI 3.1 FLASH LITE';
 define('GEMINI_API_URL', "https://generativelanguage.googleapis.com/v1beta/models/{$gemini_model}:generateContent?key={$gemini_key}");
 
 // ==========================================
@@ -270,6 +285,122 @@ if (is_array($hero_data)) {
             unset($hero_data[$hero_name_key]);
         }
     }
+}
+
+// ==========================================
+// 영웅 특성(DB) 마이그레이션 및 로드
+// ==========================================
+$hero_traits_map = array();
+try {
+    if (!table_exists($pdo, 'tb_hero_traits')) {
+        $pdo->exec("CREATE TABLE `tb_hero_traits` (
+            `hero_name` VARCHAR(120) NOT NULL,
+            `attack_type` VARCHAR(20) NOT NULL COMMENT '물리/마법',
+            `attack_range` VARCHAR(20) NOT NULL COMMENT '근거리/원거리',
+            `race` VARCHAR(40) NOT NULL COMMENT '종족',
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`hero_name`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT '영웅 전투 특성 데이터';");
+    }
+
+    $hero_traits_csv = trim("
+산적,물리,근거리,인간
+물의정령,마법,원거리,정령
+야만인,물리,근거리,인간
+투척병,물리,원거리,인간
+궁수,물리,원거리,인간
+악마병사,마법,근거리,악마
+샌드맨,마법,근거리,정령
+성기사,물리,근거리,인간
+충격로봇,마법,근거리,로봇
+레인저,물리,원거리,인간
+늑대전사,물리,근거리,동물
+독수리장군,물리,원거리,동물
+사냥꾼,물리,원거리,인간
+나무,마법,원거리,정령
+전기로봇,마법,원거리,로봇
+보안관,물리,원거리,인간
+폭풍거인,마법,근거리,정령
+호랑이사부,물리,근거리,동물
+워머신,물리,원거리,로봇
+닌자,물리,근거리,인간
+중력자탄,마법,원거리,로봇
+오크주술사,마법,원거리,오크
+펄스생성기,마법,원거리,로봇
+냥법사,마법,원거리,동물
+밤바,물리,근거리,인간
+콜디,마법,원거리,정령
+랜슬롯,마법,근거리,인간
+아이언미야옹,마법,원거리,로봇
+블롭,물리,근거리,악마
+드래곤,마법,원거리,드래곤
+모노폴리맨,물리,원거리,인간
+마마,마법,원거리,악마
+개구리 왕자,마법,원거리,동물
+개구리왕자,마법,원거리,동물
+배트맨,물리,근거리,인간
+베인,물리,원거리,인간
+인디,물리,원거리,인간
+와트,마법,원거리,로봇
+타르,물리,근거리,악마
+로켓츄,마법,원거리,동물
+우치,마법,원거리,인간
+지지,마법,원거리,동물
+마스터 쿤,물리,근거리,동물
+초나,마법,원거리,악마
+펭귄악사,마법,원거리,동물
+헤일리,물리,원거리,인간
+아토,마법,원거리,인간
+로카,물리,원거리,인간
+골라조,물리,원거리,인간
+각성 헤일리,물리,원거리,인간
+사신 다이안 (사신 개구리 승천형),마법,원거리,동물
+그랜드 마마,마법,원거리,악마
+원시 밤바,물리,근거리,인간
+귀신 닌자,물리,근거리,인간
+시공 아토,마법,원거리,인간
+닥터 펄스,마법,원거리,로봇
+탑 베인,물리,원거리,인간
+마왕 드래곤,마법,원거리,드래곤
+슈퍼 중력자탄,마법,원거리,로봇
+캡틴 로카,물리,원거리,인간
+에이스 배트맨,물리,근거리,인간
+소음킹 펭귄악사,마법,원거리,동물
+아이엠 미야옹,마법,원거리,로봇
+보스 골라조,물리,원거리,인간
+블롭단,물리,근거리,악마
+여왕 콜디,마법,원거리,정령
+불멸 쿤,물리,근거리,동물
+");
+
+    $upsert_trait = $pdo->prepare("INSERT INTO tb_hero_traits (hero_name, attack_type, attack_range, race) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE attack_type = VALUES(attack_type), attack_range = VALUES(attack_range), race = VALUES(race)");
+    $rows = preg_split('/\r\n|\n|\r/', $hero_traits_csv);
+    foreach ($rows as $line) {
+        $line = trim((string)$line);
+        if ($line === '') continue;
+        $parts = array_map('trim', explode(',', $line));
+        if (count($parts) < 4) continue;
+        $hero_name = $parts[0];
+        $attack_type = $parts[1];
+        $attack_range = $parts[2];
+        $race = $parts[3];
+        if ($hero_name === '' || $attack_type === '' || $attack_range === '' || $race === '') continue;
+        $upsert_trait->execute(array($hero_name, $attack_type, $attack_range, $race));
+    }
+
+    $trait_rows = $pdo->query("SELECT hero_name, attack_type, attack_range, race FROM tb_hero_traits")->fetchAll();
+    foreach ($trait_rows as $tr) {
+        $name = isset($tr['hero_name']) ? trim((string)$tr['hero_name']) : '';
+        if ($name === '') continue;
+        $hero_traits_map[$name] = array(
+            'attack_type' => isset($tr['attack_type']) ? trim((string)$tr['attack_type']) : '미확인',
+            'attack_range' => isset($tr['attack_range']) ? trim((string)$tr['attack_range']) : '미확인',
+            'race' => isset($tr['race']) ? trim((string)$tr['race']) : '미확인'
+        );
+    }
+} catch (\PDOException $e) {
+    $hero_traits_map = array();
+    error_log("영웅 특성 마이그레이션 실패: " . $e->getMessage());
 }
 
 // ==========================================
@@ -305,6 +436,235 @@ try {
     }
 } catch (\PDOException $e) {
     error_log("유물 시스템 마이그레이션 실패: " . $e->getMessage());
+}
+
+// ==========================================
+// 추가 마이그레이션 (아이템 시스템: 유물/소모품/장비)
+// ==========================================
+try {
+    if (!table_exists($pdo, 'tb_items')) {
+        $pdo->exec("CREATE TABLE `tb_items` (
+            `item_id` INT AUTO_INCREMENT PRIMARY KEY,
+            `uid` INT NOT NULL,
+            `item_code` VARCHAR(80) NOT NULL,
+            `category` VARCHAR(20) NOT NULL COMMENT 'artifact/consumable/equipment',
+            `item_name` VARCHAR(120) NOT NULL,
+            `item_grade` VARCHAR(20) NOT NULL DEFAULT '일반',
+            `quantity` INT NOT NULL DEFAULT 1,
+            `slot_type` VARCHAR(20) NULL COMMENT 'weapon/armor/accessory',
+            `prefix_name` VARCHAR(40) NULL,
+            `stats_json` TEXT NULL,
+            `is_equipped` TINYINT(1) NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX `idx_uid` (`uid`),
+            INDEX `idx_uid_category` (`uid`, `category`),
+            INDEX `idx_uid_equipped` (`uid`, `is_equipped`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT '아이템 인벤토리';");
+    } else {
+        if (!column_exists($pdo, 'tb_items', 'item_grade')) {
+            $pdo->exec("ALTER TABLE `tb_items` ADD COLUMN `item_grade` VARCHAR(20) NOT NULL DEFAULT '일반' AFTER `item_name`");
+        }
+        if (!column_exists($pdo, 'tb_items', 'slot_type')) {
+            $pdo->exec("ALTER TABLE `tb_items` ADD COLUMN `slot_type` VARCHAR(20) NULL AFTER `quantity`");
+        }
+        if (!column_exists($pdo, 'tb_items', 'prefix_name')) {
+            $pdo->exec("ALTER TABLE `tb_items` ADD COLUMN `prefix_name` VARCHAR(40) NULL AFTER `slot_type`");
+        }
+        if (!column_exists($pdo, 'tb_items', 'stats_json')) {
+            $pdo->exec("ALTER TABLE `tb_items` ADD COLUMN `stats_json` TEXT NULL AFTER `prefix_name`");
+        }
+        if (!column_exists($pdo, 'tb_items', 'is_equipped')) {
+            $pdo->exec("ALTER TABLE `tb_items` ADD COLUMN `is_equipped` TINYINT(1) NOT NULL DEFAULT 0 AFTER `stats_json`");
+        }
+        if (!index_exists($pdo, 'tb_items', 'idx_uid_category')) {
+            $pdo->exec("ALTER TABLE `tb_items` ADD INDEX `idx_uid_category` (`uid`, `category`)");
+        }
+        if (!index_exists($pdo, 'tb_items', 'idx_uid_equipped')) {
+            $pdo->exec("ALTER TABLE `tb_items` ADD INDEX `idx_uid_equipped` (`uid`, `is_equipped`)");
+        }
+    }
+} catch (\PDOException $e) {
+    error_log("아이템 시스템 마이그레이션 실패: " . $e->getMessage());
+}
+
+// ==========================================
+// 추가 마이그레이션 (이벤트별 아이템 드랍 테이블)
+// ==========================================
+try {
+    if (!table_exists($pdo, 'tb_item_drops')) {
+        $pdo->exec("CREATE TABLE `tb_item_drops` (
+            `drop_id` INT AUTO_INCREMENT PRIMARY KEY,
+            `source_key` VARCHAR(40) NOT NULL COMMENT 'battle_normal/battle_boss/event_chest... ',
+            `reward_type` VARCHAR(20) NOT NULL COMMENT 'none/artifact/consumable/equipment',
+            `item_code` VARCHAR(80) NULL,
+            `target_grade` VARCHAR(20) NULL,
+            `weight` INT NOT NULL DEFAULT 1,
+            `min_floor` INT NOT NULL DEFAULT 1,
+            `max_floor` INT NOT NULL DEFAULT 9999,
+            `is_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            `note` VARCHAR(200) NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_drop_lookup` (`source_key`, `is_enabled`, `min_floor`, `max_floor`),
+            KEY `idx_drop_reward` (`reward_type`, `item_code`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT '이벤트/층대별 아이템 드랍 테이블';");
+    } else {
+        if (!column_exists($pdo, 'tb_item_drops', 'target_grade')) {
+            $pdo->exec("ALTER TABLE `tb_item_drops` ADD COLUMN `target_grade` VARCHAR(20) NULL AFTER `item_code`");
+        }
+        if (!column_exists($pdo, 'tb_item_drops', 'is_enabled')) {
+            $pdo->exec("ALTER TABLE `tb_item_drops` ADD COLUMN `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 AFTER `max_floor`");
+        }
+        if (!column_exists($pdo, 'tb_item_drops', 'note')) {
+            $pdo->exec("ALTER TABLE `tb_item_drops` ADD COLUMN `note` VARCHAR(200) NULL AFTER `is_enabled`");
+        }
+        if (!index_exists($pdo, 'tb_item_drops', 'idx_drop_lookup')) {
+            $pdo->exec("ALTER TABLE `tb_item_drops` ADD INDEX `idx_drop_lookup` (`source_key`, `is_enabled`, `min_floor`, `max_floor`)");
+        }
+        if (!index_exists($pdo, 'tb_item_drops', 'idx_drop_reward')) {
+            $pdo->exec("ALTER TABLE `tb_item_drops` ADD INDEX `idx_drop_reward` (`reward_type`, `item_code`)");
+        }
+    }
+
+    $dropCount = (int)$pdo->query("SELECT COUNT(*) FROM tb_item_drops")->fetchColumn();
+    if ($dropCount === 0) {
+        $seedRows = array(
+            // 일반 전투 드랍 커브
+            array('battle_normal', 'none', null, null, 88, 1, 19, 1, '저층 기본 미드랍'),
+            array('battle_normal', 'consumable', null, null, 8, 1, 19, 1, '저층 소모품'),
+            array('battle_normal', 'equipment', null, '일반', 4, 1, 19, 1, '저층 일반 장비'),
+            array('battle_normal', 'none', null, null, 82, 20, 39, 1, '중저층 미드랍'),
+            array('battle_normal', 'consumable', null, null, 10, 20, 39, 1, '중저층 소모품'),
+            array('battle_normal', 'equipment', null, '희귀', 5, 20, 39, 1, '중저층 희귀 장비'),
+            array('battle_normal', 'equipment', null, null, 3, 20, 39, 1, '중저층 랜덤 장비'),
+            array('battle_normal', 'none', null, null, 72, 40, 79, 1, '중층 미드랍'),
+            array('battle_normal', 'consumable', null, null, 12, 40, 79, 1, '중층 소모품'),
+            array('battle_normal', 'equipment', null, '희귀', 10, 40, 79, 1, '중층 희귀 장비'),
+            array('battle_normal', 'equipment', null, '영웅', 6, 40, 79, 1, '중층 영웅 장비'),
+            array('battle_normal', 'none', null, null, 62, 80, 9999, 1, '고층 미드랍'),
+            array('battle_normal', 'consumable', null, null, 12, 80, 9999, 1, '고층 소모품'),
+            array('battle_normal', 'equipment', null, '희귀', 12, 80, 9999, 1, '고층 희귀 장비'),
+            array('battle_normal', 'equipment', null, '영웅', 10, 80, 9999, 1, '고층 영웅 장비'),
+            array('battle_normal', 'equipment', null, '전설', 4, 80, 9999, 1, '고층 전설 장비'),
+
+            // 보스 전투 드랍 커브 (확정 드랍)
+            array('battle_boss', 'artifact', 'RANDOM_UNOWNED', null, 58, 1, 39, 1, '저층 보스 미보유 유물 우선'),
+            array('battle_boss', 'equipment', null, '희귀', 30, 1, 39, 1, '저층 보스 희귀 장비'),
+            array('battle_boss', 'consumable', null, null, 12, 1, 39, 1, '저층 보스 소모품'),
+            array('battle_boss', 'artifact', 'RANDOM_UNOWNED', null, 52, 40, 79, 1, '중층 보스 미보유 유물 우선'),
+            array('battle_boss', 'equipment', null, '영웅', 30, 40, 79, 1, '중층 보스 영웅 장비'),
+            array('battle_boss', 'equipment', null, '전설', 10, 40, 79, 1, '중층 보스 전설 장비'),
+            array('battle_boss', 'consumable', null, null, 8, 40, 79, 1, '중층 보스 소모품'),
+            array('battle_boss', 'artifact', 'RANDOM_UNOWNED', null, 45, 80, 9999, 1, '고층 보스 미보유 유물 우선'),
+            array('battle_boss', 'equipment', null, '영웅', 28, 80, 9999, 1, '고층 보스 영웅 장비'),
+            array('battle_boss', 'equipment', null, '전설', 20, 80, 9999, 1, '고층 보스 전설 장비'),
+            array('battle_boss', 'consumable', null, null, 7, 80, 9999, 1, '고층 보스 소모품'),
+
+            // 탐색 이벤트 드랍 커브
+            array('event_chest', 'none', null, null, 60, 1, 29, 1, '저층 상자 미드랍'),
+            array('event_chest', 'consumable', null, null, 25, 1, 29, 1, '저층 상자 소모품'),
+            array('event_chest', 'equipment', null, '일반', 10, 1, 29, 1, '저층 상자 일반 장비'),
+            array('event_chest', 'equipment', null, '희귀', 5, 1, 29, 1, '저층 상자 희귀 장비'),
+            array('event_chest', 'none', null, null, 48, 30, 69, 1, '중층 상자 미드랍'),
+            array('event_chest', 'consumable', null, null, 28, 30, 69, 1, '중층 상자 소모품'),
+            array('event_chest', 'equipment', null, '희귀', 16, 30, 69, 1, '중층 상자 희귀 장비'),
+            array('event_chest', 'equipment', null, '영웅', 8, 30, 69, 1, '중층 상자 영웅 장비'),
+            array('event_chest', 'none', null, null, 38, 70, 9999, 1, '고층 상자 미드랍'),
+            array('event_chest', 'consumable', null, null, 30, 70, 9999, 1, '고층 상자 소모품'),
+            array('event_chest', 'equipment', null, '희귀', 17, 70, 9999, 1, '고층 상자 희귀 장비'),
+            array('event_chest', 'equipment', null, '영웅', 10, 70, 9999, 1, '고층 상자 영웅 장비'),
+            array('event_chest', 'equipment', null, '전설', 5, 70, 9999, 1, '고층 상자 전설 장비'),
+            array('event_gold', 'none', null, null, 94, 1, 9999, 1, '골드 이벤트 미드랍'),
+            array('event_gold', 'consumable', null, null, 6, 1, 9999, 1, '골드 이벤트 보너스 소모품'),
+            array('event_trap', 'none', null, null, 96, 1, 9999, 1, '함정 이벤트 미드랍'),
+            array('event_trap', 'consumable', 'cons_escape_scroll', null, 4, 1, 9999, 1, '함정 이벤트 탈출 스크롤'),
+            array('event_mana_spring', 'none', null, null, 90, 1, 9999, 1, '마나 샘 이벤트 미드랍'),
+            array('event_mana_spring', 'consumable', 'cons_mana_potion', null, 10, 1, 9999, 1, '마나 샘 물약'),
+            array('event_exp', 'none', null, null, 92, 1, 9999, 1, '경험 이벤트 미드랍'),
+            array('event_exp', 'consumable', 'cons_mana_potion', null, 8, 1, 9999, 1, '경험 이벤트 보조 물약')
+        );
+
+        $insertDrop = $pdo->prepare("INSERT INTO tb_item_drops (source_key, reward_type, item_code, target_grade, weight, min_floor, max_floor, is_enabled, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        foreach ($seedRows as $row) {
+            $insertDrop->execute($row);
+        }
+    }
+} catch (\PDOException $e) {
+    error_log("아이템 드랍 테이블 마이그레이션 실패: " . $e->getMessage());
+}
+
+// ==========================================
+// 추가 마이그레이션 (사령관 내실 강화 + 영웅 보유량 확장)
+// ==========================================
+try {
+    if (!table_exists($pdo, 'tb_commander_progression')) {
+        $pdo->exec("CREATE TABLE `tb_commander_progression` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `uid` INT NOT NULL,
+            `hero_capacity_tier` INT NOT NULL DEFAULT 0,
+            `mastery_atk_level` INT NOT NULL DEFAULT 0,
+            `mastery_def_level` INT NOT NULL DEFAULT 0,
+            `mastery_gold_level` INT NOT NULL DEFAULT 0,
+            `mastery_drop_level` INT NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uid_unique` (`uid`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT '사령관 내실 강화 정보';");
+    } else {
+        if (!column_exists($pdo, 'tb_commander_progression', 'hero_capacity_tier')) {
+            $pdo->exec("ALTER TABLE `tb_commander_progression` ADD COLUMN `hero_capacity_tier` INT NOT NULL DEFAULT 0 AFTER `uid`");
+        }
+        if (!column_exists($pdo, 'tb_commander_progression', 'mastery_atk_level')) {
+            $pdo->exec("ALTER TABLE `tb_commander_progression` ADD COLUMN `mastery_atk_level` INT NOT NULL DEFAULT 0 AFTER `hero_capacity_tier`");
+        }
+        if (!column_exists($pdo, 'tb_commander_progression', 'mastery_def_level')) {
+            $pdo->exec("ALTER TABLE `tb_commander_progression` ADD COLUMN `mastery_def_level` INT NOT NULL DEFAULT 0 AFTER `mastery_atk_level`");
+        }
+        if (!column_exists($pdo, 'tb_commander_progression', 'mastery_gold_level')) {
+            $pdo->exec("ALTER TABLE `tb_commander_progression` ADD COLUMN `mastery_gold_level` INT NOT NULL DEFAULT 0 AFTER `mastery_def_level`");
+        }
+        if (!column_exists($pdo, 'tb_commander_progression', 'mastery_drop_level')) {
+            $pdo->exec("ALTER TABLE `tb_commander_progression` ADD COLUMN `mastery_drop_level` INT NOT NULL DEFAULT 0 AFTER `mastery_gold_level`");
+        }
+        if (!index_exists($pdo, 'tb_commander_progression', 'uid_unique')) {
+            $pdo->exec("ALTER TABLE `tb_commander_progression` ADD UNIQUE KEY `uid_unique` (`uid`)");
+        }
+    }
+} catch (\PDOException $e) {
+    error_log("사령관 내실 마이그레이션 실패: " . $e->getMessage());
+}
+
+// ==========================================
+// 추가 마이그레이션 (제단 축복 리롤)
+// ==========================================
+try {
+    if (!table_exists($pdo, 'tb_commander_blessings')) {
+        $pdo->exec("CREATE TABLE `tb_commander_blessings` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `uid` INT NOT NULL,
+            `blessing_type` VARCHAR(40) NOT NULL DEFAULT 'war_fury',
+            `blessing_value` INT NOT NULL DEFAULT 6,
+            `reroll_count` INT NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uid_unique` (`uid`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT '사령관 제단 축복 정보';");
+    } else {
+        if (!column_exists($pdo, 'tb_commander_blessings', 'blessing_type')) {
+            $pdo->exec("ALTER TABLE `tb_commander_blessings` ADD COLUMN `blessing_type` VARCHAR(40) NOT NULL DEFAULT 'war_fury' AFTER `uid`");
+        }
+        if (!column_exists($pdo, 'tb_commander_blessings', 'blessing_value')) {
+            $pdo->exec("ALTER TABLE `tb_commander_blessings` ADD COLUMN `blessing_value` INT NOT NULL DEFAULT 6 AFTER `blessing_type`");
+        }
+        if (!column_exists($pdo, 'tb_commander_blessings', 'reroll_count')) {
+            $pdo->exec("ALTER TABLE `tb_commander_blessings` ADD COLUMN `reroll_count` INT NOT NULL DEFAULT 0 AFTER `blessing_value`");
+        }
+        if (!index_exists($pdo, 'tb_commander_blessings', 'uid_unique')) {
+            $pdo->exec("ALTER TABLE `tb_commander_blessings` ADD UNIQUE KEY `uid_unique` (`uid`)");
+        }
+    }
+} catch (\PDOException $e) {
+    error_log("축복 리롤 마이그레이션 실패: " . $e->getMessage());
 }
 
 // ==========================================
