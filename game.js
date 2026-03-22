@@ -4,6 +4,15 @@ let isAutoExploreMode = false;
 let isAutoRestMode = false;
 let combatTimer = null;
 let autoActionTimer = null;
+
+// ==================================
+// 버튼 툴팁 초기화 (title 속성 기반 네이티브 툴팁 보조)
+// ==================================
+function applyButtonTooltips(container) {
+    // 브라우저 기본 title 툴팁이 동작하므로, 동적 HTML 주입 후 별도 처리 없이도 정상 작동.
+    // 이 함수는 향후 커스텀 툴팁 구현 시 확장용 훅으로 남겨둡니다.
+}
+
 let isProcessingTurn = false;
 let isProcessingAction = false;
 const MONSTER_HP_STEP_DELAY = 150;
@@ -837,6 +846,17 @@ function createCenterScriptLineElement(plainText, isSystem = false, extraClass =
     newLog.dataset.plainText = plainText;
     newLog.textContent = '';
     logBox.appendChild(newLog);
+    
+    // 오래된 로그 제거 로직: 150개 초과 시 가장 앞의 로그 삭제
+    const MAX_LOG_ENTRIES = 150;
+    const logEntries = logBox.querySelectorAll('.log-entry');
+    if (logEntries.length > MAX_LOG_ENTRIES) {
+        const entriesToRemove = logEntries.length - MAX_LOG_ENTRIES;
+        for (let i = 0; i < entriesToRemove; i++) {
+            logEntries[i].remove();
+        }
+    }
+    
     logBox.scrollTop = logBox.scrollHeight;
     return newLog;
 }
@@ -1590,6 +1610,24 @@ function startCombat() {
     enterCombatState(window.currentMobName, window.currentMobMaxHp);
 }
 
+function forceCombatUiFromMessage(message) {
+    const msg = String(message || '');
+    if (!msg.includes('대치 중인 적')) return false;
+
+    const fallbackName = window.currentMobName || '정체불명의 적';
+    const fallbackMaxHp = Math.max(1, Number(window.currentMobMaxHp || 1));
+    const fallbackHp = Math.max(1, Number(window.currentMobHp || fallbackMaxHp || 1));
+
+    window.currentMobName = fallbackName;
+    window.currentMobMaxHp = fallbackMaxHp;
+    window.currentMobHp = fallbackHp;
+    window.isCombat = true;
+
+    enterCombatState(fallbackName, fallbackMaxHp);
+    addLog('⚠️ 이미 전투 중입니다. 전투 화면으로 전환했습니다.', true);
+    return true;
+}
+
 // game.js 내부 sendAction 함수 교체
 async function sendAction(actionType) {
     if (isProcessingAction) return;
@@ -1659,7 +1697,8 @@ async function sendAction(actionType) {
                         if (data.msg) addLog(data.msg, true);
                         shouldRescheduleAutomation = true;
                     } else if (data.status === 'error') {
-                    addLog(data.msg, true);
+                    const switched = forceCombatUiFromMessage(data.msg);
+                    if (!switched) addLog(data.msg, true);
                 }
                 } else if (actionType === 'rest' || actionType === 'summon') {
                  if(data.status === 'success') {
@@ -1680,7 +1719,8 @@ async function sendAction(actionType) {
                     } else if (actionType === 'rest' && isAutoExploreMode) {
                         shouldRescheduleAutomation = true;
                     }
-                    addLog(data.msg, true);
+                    const switched = forceCombatUiFromMessage(data.msg);
+                    if (!switched) addLog(data.msg, true);
                  }
             } else if (actionType === 'next_floor') {
                 if (data.status === 'success' || data.status === 'encounter') {
@@ -1698,7 +1738,8 @@ async function sendAction(actionType) {
                     }
                     shouldRescheduleAutomation = hasAutomationEnabled();
                 } else {
-                    addLog(data.msg, true);
+                    const switched = forceCombatUiFromMessage(data.msg);
+                    if (!switched) addLog(data.msg, true);
                 }
             }
         }
@@ -1958,6 +1999,24 @@ function showObtainEffect(rank, name) {
     setTimeout(() => { overlay.style.display = 'none'; }, 4000);
 }
 
+function openItemTab(evt, tabName) {
+    const tabContents = document.querySelectorAll('.item-tab-content');
+    tabContents.forEach((el) => {
+        el.style.display = 'none';
+        el.classList.remove('active');
+    });
+
+    const tabLinks = document.querySelectorAll('.item-tab-link');
+    tabLinks.forEach((el) => el.classList.remove('active'));
+
+    const tab = document.getElementById(tabName);
+    if (tab) {
+        tab.style.display = 'block';
+        tab.classList.add('active');
+    }
+    if (evt && evt.currentTarget) evt.currentTarget.classList.add('active');
+}
+
 function showLevelUpEffect(fromLevel, toLevel, levelupCount = 1) {
     const overlay = document.getElementById('levelup-overlay');
     const levelText = document.getElementById('levelup-level-text');
@@ -1979,8 +2038,10 @@ async function openModal(modalId, listAreaId, action) {
     document.getElementById(listAreaId).innerHTML = '불러오는 중...';
     const data = await callApi(action);
     if(data && data.status === 'success') {
-        document.getElementById(listAreaId).innerHTML = data.html;
-        applyButtonTooltips(document.getElementById(listAreaId));
+        const listArea = document.getElementById(listAreaId);
+        listArea.innerHTML = data.html;
+        applyButtonTooltips(listArea);
+        if (action === 'item_info') initItemBagEnhancements(listArea);
     }
 }
 const openRanking = () => openModal('ranking-modal', 'ranking-list-area', 'ranking');
@@ -2089,8 +2150,6 @@ async function openProgressionModal() {
         return;
     }
 
-    updateHeroCapacityDisplay(data.hero_owned, data.hero_limit);
-
     let html = `<div style="margin-bottom:14px; color:#ffcc80; font-size:0.95rem;">💰 보유 골드: <b>${Number(data.gold).toLocaleString()}G</b> &nbsp;|&nbsp; 🧑‍🤝‍🧑 영웅 보유: <b>${data.hero_owned}/${data.hero_limit}</b>명</div>`;
 
     // 내실 강화 섹션
@@ -2190,6 +2249,7 @@ async function buyItem(itemCode) {
         if (listArea && data.html !== undefined) {
             listArea.innerHTML = data.html;
             applyButtonTooltips(listArea);
+            initItemBagEnhancements(listArea);
         }
         if (data.new_gold !== undefined) {
             document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
@@ -2209,6 +2269,7 @@ async function useItem(itemId) {
         if (listArea && data.html !== undefined) {
             listArea.innerHTML = data.html;
             applyButtonTooltips(listArea);
+            initItemBagEnhancements(listArea);
         }
         if (data.new_gold !== undefined) {
             document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
@@ -2247,6 +2308,7 @@ async function toggleEquipItem(itemId, action) {
         if (listArea && data.html !== undefined) {
             listArea.innerHTML = data.html;
             applyButtonTooltips(listArea);
+            initItemBagEnhancements(listArea);
         }
         if (data.new_gold !== undefined) {
             document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
@@ -2266,6 +2328,7 @@ async function synthesizeEquipment(baseGrade) {
         if (listArea && data.html !== undefined) {
             listArea.innerHTML = data.html;
             applyButtonTooltips(listArea);
+            initItemBagEnhancements(listArea);
         }
         if (data.new_gold !== undefined) {
             document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
@@ -2312,6 +2375,135 @@ function setupStatButtons() {
             upStat(statType, 1); // 클릭 시 1포인트씩 API로 전송!
         });
     });
+}
+
+function initCollapsiblePanels() {
+    const toggles = Array.from(document.querySelectorAll('.section-arrow-toggle[data-collapse-target]'));
+    if (toggles.length === 0) return;
+
+    toggles.forEach((toggle) => {
+        const targetId = toggle.getAttribute('data-collapse-target');
+        if (!targetId) return;
+
+        const body = document.getElementById(targetId);
+        if (!body) return;
+
+        const header = toggle.closest('.section-header');
+        const storageKey = `${COLLAPSE_STORAGE_PREFIX}${targetId}`;
+        const applyState = (collapsed) => {
+            body.classList.toggle('is-collapsed', collapsed);
+            if (header) header.classList.toggle('is-collapsed', collapsed);
+            toggle.textContent = collapsed ? '▼' : '▲';
+            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        };
+
+        applyState(localStorage.getItem(storageKey) === '1');
+        const onToggle = () => {
+            const willCollapse = !body.classList.contains('is-collapsed');
+            applyState(willCollapse);
+            localStorage.setItem(storageKey, willCollapse ? '1' : '0');
+        };
+
+        toggle.addEventListener('click', onToggle);
+        toggle.addEventListener('keydown', (evt) => {
+            if (evt.key === 'Enter' || evt.key === ' ') {
+                evt.preventDefault();
+                onToggle();
+            }
+        });
+    });
+}
+
+function initItemBagEnhancements(rootEl) {
+    const root = rootEl || document.getElementById('item-list-area');
+    if (!root) return;
+
+    const gradeFilter = root.querySelector('#equip-grade-filter');
+    const nameSearch = root.querySelector('#equip-name-search');
+    const sortSelect = root.querySelector('#equip-sort-select');
+    const slotGroups = Array.from(root.querySelectorAll('.equip-slot-group'));
+
+    if (!gradeFilter || !nameSearch || !sortSelect || slotGroups.length === 0) return;
+
+    const slotOrderMap = {
+        '오른손': 1,
+        '왼손': 2,
+        '머리': 3,
+        '갑옷': 4,
+        '망토': 5,
+        '장갑': 6,
+        '신발': 7,
+        '목걸이': 8,
+        '반지': 9
+    };
+
+    const compareRows = (a, b, mode) => {
+        const aId = Number(a.dataset.itemId || 0);
+        const bId = Number(b.dataset.itemId || 0);
+        const aGrade = Number(a.dataset.gradeTier || 0);
+        const bGrade = Number(b.dataset.gradeTier || 0);
+        const aSlot = String(a.dataset.slotLabel || '');
+        const bSlot = String(b.dataset.slotLabel || '');
+        const aSlotOrder = slotOrderMap[aSlot] || 999;
+        const bSlotOrder = slotOrderMap[bSlot] || 999;
+
+        if (mode === 'grade') {
+            if (aGrade !== bGrade) return bGrade - aGrade;
+            return bId - aId;
+        }
+        if (mode === 'slot') {
+            if (aSlotOrder !== bSlotOrder) return aSlotOrder - bSlotOrder;
+            if (aGrade !== bGrade) return bGrade - aGrade;
+            return bId - aId;
+        }
+        return bId - aId;
+    };
+
+    const applyFiltersAndSort = () => {
+        const selectedGrade = String(gradeFilter.value || 'all');
+        const keyword = String(nameSearch.value || '').trim().toLowerCase();
+        const sortMode = String(sortSelect.value || 'latest');
+
+        slotGroups.forEach((group) => {
+            const rows = Array.from(group.querySelectorAll('.equip-item-row'));
+            rows.sort((a, b) => compareRows(a, b, sortMode));
+            rows.forEach((row) => {
+                if (row.parentElement) row.parentElement.appendChild(row);
+
+                const rowGrade = String(row.dataset.grade || '');
+                const rowName = String(row.dataset.itemName || '').toLowerCase();
+                const byGrade = (selectedGrade === 'all') || (rowGrade === selectedGrade);
+                const byName = keyword === '' || rowName.includes(keyword);
+                row.style.display = (byGrade && byName) ? '' : 'none';
+            });
+
+            const visibleCount = rows.filter((r) => r.style.display !== 'none').length;
+            const counter = group.querySelector('.equip-slot-count');
+            if (counter) counter.textContent = `(${visibleCount})`;
+            group.style.display = visibleCount > 0 ? '' : 'none';
+        });
+
+        if (sortMode === 'slot') {
+            const listContainer = root.querySelector('#equip-list-scroller');
+            if (listContainer) {
+                slotGroups
+                    .slice()
+                    .sort((a, b) => {
+                        const aSlot = String(a.dataset.slotLabel || '');
+                        const bSlot = String(b.dataset.slotLabel || '');
+                        return (slotOrderMap[aSlot] || 999) - (slotOrderMap[bSlot] || 999);
+                    })
+                    .forEach((group) => listContainer.appendChild(group));
+            }
+        }
+    };
+
+    [gradeFilter, nameSearch, sortSelect].forEach((el) => {
+        el.addEventListener('input', applyFiltersAndSort);
+        el.addEventListener('change', applyFiltersAndSort);
+    });
+
+    applyFiltersAndSort();
 }
 
 // ==================================

@@ -397,6 +397,33 @@ return array (
             'value' => 450,
           ),
         ),
+        'level_up' => 
+        array (
+          6 => 
+          array (
+            'description' => '발동확률 20% 증가',
+            'effects' => 
+            array (
+              0 => 
+              array (
+                'type' => 'damage_aoe_magic',
+                'value' => 450,
+              ),
+            ),
+          ),
+          12 => 
+          array (
+            'description' => '피해량 50% 증폭',
+            'effects' => 
+            array (
+              0 => 
+              array (
+                'type' => 'damage_aoe_magic',
+                'value' => 675,
+              ),
+            ),
+          ),
+        ),
       ),
     ),
   ),
@@ -424,6 +451,21 @@ return array (
             'duration' => 1.125,
           ),
         ),
+        'level_up' => 
+        array (
+          12 => 
+          array (
+            'description' => '기절 시간 1.6875초로 증폭',
+            'effects' => 
+            array (
+              0 => 
+              array (
+                'type' => 'stun',
+                'duration' => 1.6875,
+              ),
+            ),
+          ),
+        ),
       ),
     ),
   ),
@@ -444,6 +486,11 @@ return array (
           array (
             'type' => 'damage_single_physical',
             'value' => 300,
+          ),
+          1 => 
+          array (
+            'type' => 'multi_hit',
+            'value' => 3,
           ),
         ),
       ),
@@ -466,6 +513,14 @@ return array (
         'name' => '패시브',
         'description' => '아군 전체의 공격력을 10% 증가시킵니다.',
         'type' => 'passive_aura',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'team_damage_bonus_pct',
+            'value' => 10,
+          ),
+        ),
       ),
       1 => 
       array (
@@ -505,6 +560,14 @@ return array (
         'name' => '패시브',
         'description' => '아군 전체의 공격 속도를 10% 증가시킵니다.',
         'type' => 'passive_aura',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'team_attack_speed_bonus_pct',
+            'value' => 10,
+          ),
+        ),
       ),
       1 => 
       array (
@@ -555,6 +618,21 @@ return array (
             'value' => 15,
           ),
         ),
+        'level_up' => 
+        array (
+          12 => 
+          array (
+            'description' => '방어력 감소 22.5로 증폭',
+            'effects' => 
+            array (
+              0 => 
+              array (
+                'type' => 'shred_armor_flat_aura',
+                'value' => 22.5,
+              ),
+            ),
+          ),
+        ),
       ),
       1 => 
       array (
@@ -568,6 +646,14 @@ return array (
         'name' => '정조준',
         'description' => '속박된 적에게 입히는 피해가 50% 증가합니다.',
         'type' => 'passive_buff',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'conditional_damage_when_stun',
+            'value' => 50,
+          ),
+        ),
       ),
     ),
   ),
@@ -669,13 +755,30 @@ return array (
         'name' => '속사',
         'description' => '10% 확률로 6초 동안 공격속도가 50% 증가합니다.',
         'type' => 'passive_buff',
-        'trigger_chance' => 10,
+        'trigger_chance' => 15,
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'extra_attack_chance',
+            'value' => 30,
+          ),
+        ),
       ),
       1 => 
       array (
         'name' => '관통탄',
         'description' => '15회 공격마다 일직선상의 적에게 3000% 물리피해를 주고 3회 동안 기본 공격 피해가 100% 증가합니다.',
-        'type' => 'passive_buff',
+        'type' => 'on_attack_nth',
+        'nth' => 15,
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'damage_single_physical',
+            'value' => 3000,
+          ),
+        ),
       ),
       2 => 
       array (
@@ -715,7 +818,8 @@ return array (
       array (
         'name' => '번개 강타',
         'description' => '15회 공격마다 범위 내 적에게 공격력의 5000% 마법피해를 줍니다.',
-        'type' => 'passive_buff',
+        'type' => 'on_attack_nth',
+        'nth' => 15,
         'effects' => 
         array (
           0 => 
@@ -868,6 +972,11 @@ return array (
             'type' => 'damage_single_physical',
             'value' => 150,
           ),
+          1 => 
+          array (
+            'type' => 'multi_hit',
+            'value' => 2,
+          ),
         ),
       ),
       1 => 
@@ -875,7 +984,7 @@ return array (
         'name' => '암살',
         'description' => '16.5% 확률로 대상에게 공격력의 3000% 물리피해를 주고 5초 간 기절시킵니다. (Lv.12 발동확률 65% 증폭 적용)',
         'type' => 'passive_buff',
-        'trigger_chance' => 5,
+        'trigger_chance' => 16.5,
         'effects' => 
         array (
           0 => 
@@ -887,6 +996,26 @@ return array (
           array (
             'type' => 'stun',
             'duration' => 5.0,
+          ),
+        ),
+        'level_up' => 
+        array (
+          12 => 
+          array (
+            'description' => '발동확률 65% 증폭 (약 27%)',
+            'effects' => 
+            array (
+              0 => 
+              array (
+                'type' => 'damage_single_physical',
+                'value' => 3000,
+              ),
+              1 => 
+              array (
+                'type' => 'stun',
+                'duration' => 5.0,
+              ),
+            ),
           ),
         ),
       ),
@@ -909,6 +1038,16 @@ return array (
         'description' => '공격 시 10% 확률로 중력장을 생성하여 적을 끌어당기고 이동속도를 늦춥니다.',
         'type' => 'on_attack',
         'trigger_chance' => 10,
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'pull_enemies',
+            'value' => 35,
+            'duration' => 2,
+            'slow_flat' => 18,
+          ),
+        ),
       ),
       1 => 
       array (
@@ -928,6 +1067,21 @@ return array (
             'type' => 'damage_single_magic',
             'value' => 1000,
           ),
+          1 => 
+          array (
+            'type' => 'field_object',
+            'value' => 300,
+            'duration' => 5,
+            'slow_flat' => 22,
+            'pull_power' => 60,
+          ),
+          2 => 
+          array (
+            'type' => 'pull_enemies',
+            'value' => 60,
+            'duration' => 3,
+            'slow_flat' => 24,
+          ),
         ),
       ),
     ),
@@ -943,12 +1097,28 @@ return array (
         'description' => '10% 확률로 적의 방어력을 10초 동안 20 감소시킵니다.',
         'type' => 'passive_buff',
         'trigger_chance' => 10,
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'persistent_debuff_armor_flat',
+            'value' => 20,
+          ),
+        ),
       ),
       1 => 
       array (
         'name' => '피의 굶주림',
         'description' => '아군 전체의 공격 속도를 15% 증가시킵니다.',
         'type' => 'passive_aura',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'team_attack_speed_bonus_pct',
+            'value' => 15,
+          ),
+        ),
       ),
       2 => 
       array (
@@ -1581,6 +1751,14 @@ return array (
         'name' => '거리 비례',
         'description' => '대상과 거리가 멀수록 피해량이 최대 500%까지 증폭됩니다.',
         'type' => 'passive_buff',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'distance_damage_bonus_pct',
+            'value' => 500,
+          ),
+        ),
       ),
       1 => 
       array (
@@ -1594,6 +1772,24 @@ return array (
         'name' => '폭풍의 눈',
         'description' => '(궁극기) 중앙에 폭풍을 소환해 5초 간 매초 2000% 마법피해를 주고 적을 끌어당깁니다.',
         'type' => 'ultimate',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'field_object',
+            'value' => 220,
+            'duration' => 5,
+            'slow_flat' => 18,
+            'pull_power' => 45,
+          ),
+          1 => 
+          array (
+            'type' => 'pull_enemies',
+            'value' => 45,
+            'duration' => 2,
+            'slow_flat' => 16,
+          ),
+        ),
       ),
     ),
   ),
@@ -1671,6 +1867,17 @@ return array (
         'name' => '나아무 소환',
         'description' => '(궁극기) 10초 간 적을 막는 거대 나아무를 소환하여 길을 완벽히 차단하고 지속 피해를 줍니다.',
         'type' => 'ultimate',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'field_object',
+            'value' => 180,
+            'duration' => 6,
+            'slow_flat' => 20,
+            'pull_power' => 25,
+          ),
+        ),
       ),
     ),
   ),
@@ -1718,6 +1925,14 @@ return array (
         'name' => '저격',
         'description' => '거리가 가장 먼 적을 우선 타격하며, 거리에 비례하여 최대 300%의 추가 물리피해를 줍니다.',
         'type' => 'passive_buff',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'distance_damage_bonus_pct',
+            'value' => 300,
+          ),
+        ),
       ),
       1 => 
       array (
@@ -1758,6 +1973,21 @@ return array (
         'name' => '시간 정지',
         'description' => '(궁극기) 3초 동안 필드 위 모든 적의 움직임을 완벽히 멈춥니다. (기절과 별개 판정)',
         'type' => 'ultimate',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'stun',
+            'duration' => 3,
+          ),
+          1 => 
+          array (
+            'type' => 'pull_enemies',
+            'value' => 40,
+            'duration' => 2,
+            'slow_flat' => 20,
+          ),
+        ),
       ),
     ),
   ),
@@ -1829,6 +2059,14 @@ return array (
         'name' => '초정밀 저격',
         'description' => '가장 먼 적을 타격하며 거리 비례 추가 피해가 최대 600%로 증폭됩니다.',
         'type' => 'passive_buff',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'distance_damage_bonus_pct',
+            'value' => 600,
+          ),
+        ),
       ),
       1 => 
       array (
@@ -1841,6 +2079,14 @@ return array (
         'name' => '처형',
         'description' => '체력 5% 미만인 보스 몬스터를 즉시 즉사시킵니다.',
         'type' => 'passive_buff',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'execute_below_hp',
+            'value' => 5,
+          ),
+        ),
       ),
       3 => 
       array (
@@ -1860,6 +2106,14 @@ return array (
         'name' => '사신의 자질',
         'description' => '적에게 피해를 줄 때 체력이 5% 미만인 적은 즉시 처형합니다.',
         'type' => 'passive_buff',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'execute_below_hp',
+            'value' => 5,
+          ),
+        ),
       ),
       1 => 
       array (
