@@ -1968,6 +1968,19 @@ async function synthesizeHero(heroName) {
     }
 }
 
+async function sellMythicHero(heroName) {
+    if (!confirm(`${heroName} 신화 영웅 1기를 판매하고 5,000G를 획득하시겠습니까?`)) return;
+    const formData = new URLSearchParams();
+    formData.append('hero_name', heroName);
+    const data = await callApi('sell_hero', { method: 'POST', body: formData });
+    if (data && data.status === 'success') {
+        addLog(data.msg);
+        updateInventoryUI(data);
+    } else if (data) {
+        addLog('❌ 판매 실패: ' + data.msg, true);
+    }
+}
+
 async function combineHero(mode, targetName) {
     const formData = new URLSearchParams(); 
     formData.append('mode', mode); 

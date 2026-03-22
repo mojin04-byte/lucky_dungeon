@@ -259,6 +259,14 @@ function get_uid_or_fail() {
 	return (int)$_SESSION['uid'];
 }
 
+function increment_equipped_mythic_battle_count(PDO $pdo, $uid) {
+	$uid = (int)$uid;
+	if ($uid <= 0) return 0;
+	$st = $pdo->prepare("UPDATE tb_heroes SET battle_count = battle_count + 1 WHERE uid = ? AND hero_rank = '신화' AND is_equipped = 1 AND quantity > 0");
+	$st->execute(array($uid));
+	return (int)$st->rowCount();
+}
+
 function cleanup_combat_if_stale(PDO $pdo, $uid, &$cmd) {
 	if ((int)$cmd['is_combat'] !== 1) return;
 	if ((int)$cmd['mob_hp'] > 0 && (int)$cmd['mob_max_hp'] > 0 && trim((string)$cmd['mob_name']) !== '') return;
@@ -2487,9 +2495,7 @@ function build_hero_tooltip($hero) {
 		$lines[] = '상태: 대기 중';
 	}
 
-	if ($battle_count > 0) {
-		$lines[] = "전투 참여: {$battle_count}회";
-	}
+	$lines[] = "전투 참여: {$battle_count}회";
 
 	$skills = isset($hero_data[$name]['skills']) && is_array($hero_data[$name]['skills']) ? $hero_data[$name]['skills'] : array();
 	if (!empty($skills)) {
@@ -2536,9 +2542,13 @@ function generate_hero_lists($heroes, $current_floor = 1) {
 			} else {
 				$card .= "<div style='display:flex; gap:6px;'>";
 				$card .= "<button class='btn' title='출전 덱에 추가' style='padding:5px 10px; font-size:0.8rem;' onclick='toggleEquip({$h['inv_id']}, 1)'>출전</button>";
-				if (in_array($h['hero_rank'], array('일반', '희귀'), true) && (int)$h['quantity'] >= 3) {
+				if (in_array($h['hero_rank'], array('일반', '희귀', '영웅'), true) && (int)$h['quantity'] >= 3) {
 					$hero_name_js = json_encode($h['hero_name']);
 					$card .= "<button class='btn' title='동일 영웅 3기를 상위 등급으로 합성' style='padding:5px 10px; font-size:0.8rem; background:#2f7d32;' onclick='synthesizeHero({$hero_name_js})'>합성</button>";
+				}
+				if ((string)$h['hero_rank'] === '신화' && (int)$h['quantity'] >= 1) {
+					$hero_name_js = json_encode($h['hero_name']);
+					$card .= "<button class='btn' title='신화 영웅 1기를 판매하여 5,000G 획득' style='padding:5px 10px; font-size:0.8rem; background:#8e24aa;' onclick='sellMythicHero({$hero_name_js})'>판매(5000G)</button>";
 				}
 				$card .= "</div></div>";
 			}
@@ -4144,6 +4154,10 @@ function handle_combat(PDO $pdo) {
 			reset_orc_frenzy_state();
 		}
 
+		if ($status === 'victory') {
+			increment_equipped_mythic_battle_count($pdo, $uid);
+		}
+
 		if ($reward_meta === null && $total_gold_gain > 0) {
 			add_commander_gold($pdo, $uid, $total_gold_gain, true);
 		}
@@ -4884,6 +4898,7 @@ function handle_skill(PDO $pdo) {
 					$reward_meta['new_hp'] = $new_hp;
 					$reward_meta['max_hp'] = (int)$item_drop['artifact_result']['new_max_hp'];
 				}
+				increment_equipped_mythic_battle_count($pdo, $uid);
 				unset($_SESSION['combat_state']);
 				$pdo->prepare("UPDATE tb_commanders SET hp = ?, mp = ?, is_combat = 0, mob_name = '', mob_hp = 0, mob_max_hp = 0, mob_atk = 0 WHERE uid = ?")
 					->execute(array($new_hp, $new_mp, $uid));
@@ -5147,9 +5162,10 @@ function handle_synthesize(PDO $pdo) {
 		if (!$source || (int)$source['quantity'] < 3) throw new Exception('합성에 필요한 영웅 수량(3)이 부족합니다.');
 		$rank_up_map = array(
 			'일반' => '희귀',
-			'희귀' => '영웅'
+			'희귀' => '영웅',
+			'영웅' => '전설'
 		);
-		if (!isset($rank_up_map[$source['hero_rank']])) throw new Exception('합성은 일반/희귀 영웅만 가능합니다.');
+		if (!isset($rank_up_map[$source['hero_rank']])) throw new Exception('합성은 일반/희귀/영웅 영웅만 가능합니다.');
 		$next_rank = $rank_up_map[$source['hero_rank']];
 
 		$remain = (int)$source['quantity'] - 3;
@@ -5188,6 +5204,66 @@ function handle_synthesize(PDO $pdo) {
 		$pdo->commit();
 		$cap = get_hero_capacity_snapshot($pdo, $uid);
 		echo json_encode(array('status'=>'success','msg'=>$msg,'new_rank'=>$next_rank,'new_hero_name'=>$new_hero_name,'deck_html'=>$deck_html,'inv_html'=>$inv_html,'deck_count'=>$deck_count,'deck_synergy_html'=>$deck_synergy_html,'new_gold'=>$current_gold,'hero_owned'=>$cap['hero_owned'],'hero_limit'=>$cap['hero_limit']));
+	} catch (Exception $e) {
+		if ($pdo->inTransaction()) $pdo->rollBack();
+		json_error($e->getMessage());
+	}
+}
+
+function handle_sell_hero(PDO $pdo) {
+	app_log('handle_sell_hero.start');
+	$uid = get_uid_or_fail();
+	$hero_name = isset($_POST['hero_name']) ? trim((string)$_POST['hero_name']) : '';
+	if ($hero_name === '') { json_error('판매할 영웅 이름이 필요합니다.'); return; }
+
+	$gold_reward = 5000;
+	try {
+		$pdo->beginTransaction();
+
+		$st = $pdo->prepare("SELECT inv_id, hero_rank, quantity FROM tb_heroes WHERE uid = ? AND hero_name = ? AND quantity > 0 AND is_equipped = 0 AND is_on_expedition = 0 ORDER BY quantity DESC, inv_id ASC LIMIT 1 FOR UPDATE");
+		$st->execute(array($uid, $hero_name));
+		$source = $st->fetch();
+		if (!$source) throw new Exception('판매 가능한 영웅이 없습니다. (출전/파견 해제 필요)');
+		if ((string)$source['hero_rank'] !== '신화') throw new Exception('신화 영웅만 판매할 수 있습니다.');
+
+		$remain = (int)$source['quantity'] - 1;
+		if ($remain > 0) {
+			$pdo->prepare("UPDATE tb_heroes SET quantity = ? WHERE inv_id = ?")->execute(array($remain, $source['inv_id']));
+		} else {
+			$pdo->prepare("DELETE FROM tb_heroes WHERE inv_id = ?")->execute(array($source['inv_id']));
+		}
+
+		$cmd_st = $pdo->prepare("SELECT gold, current_floor FROM tb_commanders WHERE uid = ? FOR UPDATE");
+		$cmd_st->execute(array($uid));
+		$cmd = $cmd_st->fetch();
+		if (!$cmd) throw new Exception('사령관 정보를 찾을 수 없습니다.');
+
+		$new_gold = (int)$cmd['gold'] + $gold_reward;
+		$pdo->prepare("UPDATE tb_commanders SET gold = ? WHERE uid = ?")->execute(array($new_gold, $uid));
+
+		$all = $pdo->prepare("SELECT * FROM tb_heroes WHERE uid = ? AND quantity > 0 ORDER BY is_equipped DESC, hero_rank DESC, hero_name ASC");
+		$all->execute(array($uid));
+		$heroes = $all->fetchAll();
+		$current_floor = max(1, (int)(isset($cmd['current_floor']) ? $cmd['current_floor'] : 1));
+		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes, $current_floor);
+
+		$trace_msg = "💰 신화 영웅 판매: {$hero_name} x1 -> +{$gold_reward}G";
+		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $trace_msg));
+		$pdo->commit();
+
+		$cap = get_hero_capacity_snapshot($pdo, $uid);
+		$msg = "💰 <b>{$hero_name}</b> 판매 완료! <span style='color:#ffd54f;'>+{$gold_reward}G</span>";
+		echo json_encode(array(
+			'status' => 'success',
+			'msg' => $msg,
+			'new_gold' => $new_gold,
+			'deck_html' => $deck_html,
+			'inv_html' => $inv_html,
+			'deck_count' => $deck_count,
+			'deck_synergy_html' => $deck_synergy_html,
+			'hero_owned' => $cap['hero_owned'],
+			'hero_limit' => $cap['hero_limit']
+		));
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
 		json_error($e->getMessage());
@@ -6497,6 +6573,7 @@ switch ($action) {
 	case 'item_use': handle_item_use($pdo); break;
 	case 'item_toggle_equip': handle_item_toggle_equip($pdo); break;
 	case 'item_synthesize': handle_item_synthesize($pdo); break;
+	case 'sell_hero': handle_sell_hero($pdo); break;
 	case 'progression_upgrade': handle_progression_upgrade($pdo); break;
 	case 'blessing_reroll': handle_blessing_reroll($pdo); break;
 	case 'get_progression_state': handle_get_progression_state($pdo); break;
