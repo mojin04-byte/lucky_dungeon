@@ -241,6 +241,7 @@ try {
         </div>
 
         <div style="margin-bottom: 25px; padding: 10px; background: #222; border-radius: 4px; color: #ffd700; font-weight: bold; text-align: center;">💰 골드: <span id="gold-display"><?= number_format($commander['gold']) ?></span> G</div>
+        <div style="margin-bottom: 16px; padding: 10px; background: #1f2230; border-radius: 4px; color: #90caf9; font-weight: bold; text-align: center;">💎 신화석: <span id="mythstone-display"><?= number_format((int)($commander['mythstone'] ?? 0)) ?></span></div>
         
         <div class="section-header" style="margin-top:6px;">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%;">

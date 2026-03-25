@@ -317,12 +317,61 @@ phpMyAdmin 공식 홈
 - "신화석 10개 소모 → 불멸 진화 재료 일부 대체" 경로 추가(불멸 영웅 진입 장벽 완화)
 
 8. 개발 체크리스트 (신화 판매)
-- [ ] tb_commanders 테이블에 mythstone 컬럼 추가 (ALTER TABLE)
-- [ ] handle_sell_hero() 함수 구현 (api.php)
-- [ ] handle_use_mythstone() 함수 구현 (api.php)
-- [ ] 신화 영웅 카드에 [판매 ▼] 드롭다운 버튼 추가 (generate_hero_lists)
-- [ ] 판매 확인 팝업 JS 함수 구현 (sellHero, confirmSellHero)
-- [ ] 좌측 자원 패널에 신화석 수량 표시 UI 추가
-- [ ] 신화석 사용 UI (제단/조합 화면에 신화석 비용 표시)
-- [ ] 로그 메시지 포맷 정의 및 연동 검증
-- [ ] php -l api.php 문법 검증 통과 확인
+- [완료] tb_commanders 테이블에 mythstone 컬럼 추가 (bootstrap 자동 마이그레이션 + SQL 반영)
+- [완료] handle_sell_hero() 함수 확장 구현 (api.php, sell_type: gold/mythstone)
+- [완료] handle_use_mythstone() 함수 구현 (api.php)
+- [완료] 신화 영웅 카드 판매 UI 추가 (generate_hero_lists, 골드/신화석 2버튼)
+- [완료] 판매 확인 팝업 JS 함수 구현 (sellHero, confirmSellHero)
+- [완료] 좌측 자원 패널에 신화석 수량 표시 UI 추가
+- [완료] 신화석 사용 UI 추가 (조합 모달 상단 비용 표시 + 사용 버튼)
+- [완료] 로그 메시지 포맷 연동 (판매/사용 모두 tb_logs 기록)
+- [완료] 문법 검증 통과 (api.php, game.js, index.php, bootstrap.php)
+
+
+==================================================
+[D] BALANCE PATCH 2 통합 기록 (단일 기준 문서)
+==================================================
+
+1. 통합 목적
+- 기존 분산 문서 3개(BALANCE_PATCH_2.md, BALANCE_PATCH_2_APPLIED.md, BALANCE_PATCH_2_PHASE2_PROGRESS.md)의
+  중복/충돌을 제거하고 이 섹션을 단일 기준(Single Source of Truth)으로 사용한다.
+
+2. 최신 기준 상태 (2026-03-25)
+- Phase 1: 완료
+  - 성기사/충격로봇/사냥꾼/보안관/닌자 값 조정 반영
+- Phase 2: 완료
+  - on_attack_nth: 전투/스킬 루프 공통 반영
+  - team_buff: team_damage_bonus_pct, team_attack_speed_bonus_pct 실제 계산 반영
+  - conditional_damage: 기절/빙결 조건부 피해 배수 반영
+  - persistent_debuff: 지속 방어력 감소 누적 및 턴 감소 반영
+  - multi_hit: 다중 타격 추가 피해 반영
+- Phase 3: 진행 중
+  - 거리 비례 피해(distance_damage_bonus_pct): 반영
+  - execute_below_hp: 반영 (보스 즉사 제한 포함)
+  - pull_enemies + field_object: 반영
+  - summon_unit: 1차 반영 완료
+    - 전투/스킬 턴 시작 시 소환 유닛 자동 타격
+    - 지속 턴 감소 및 종료 로그 처리
+    - 연결 영웅: 닌자(그림자 분신), 마마(사령술), 초월 닌자(귀신 분신)
+
+3. 코드 기준 확인 포인트
+- 핵심 효과 처리: api.php apply_dynamic_effect
+- 전투 턴 반영: api.php handle_combat
+- 스킬 턴 반영: api.php handle_skill
+- 장판/처형/지속디버프/소환 유닛 보조 함수: api.php 유틸 함수 블록
+- 스킬 데이터: config/hero_data.php
+
+4. 잔여 과제 (Phase 3 고도화)
+- summon_unit 고도화
+  - 소환체별 고유 스탯 테이블
+  - 중첩 상한/갱신 규칙
+  - 보스전 차등 보정
+- field_object 중첩 정책
+  - 동일 스킬 갱신, 이종 장판 상한
+- execute 보스 차등화
+  - 보스 타입별 제한 비율 분기
+- 전투 로그 샘플 기반 계수 재튜닝
+
+5. 운영 원칙
+- 밸런스 진행 문서는 본 plan.me 섹션만 갱신한다.
+- 신규 실험/중간 메모는 임시 파일 대신 이 섹션 하단의 날짜별 로그로 누적한다.

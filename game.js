@@ -74,6 +74,10 @@ function updateInventoryUI(data) {
     if (data.inv_html !== undefined) document.getElementById('hero-list').innerHTML = data.inv_html;
     if (data.deck_count !== undefined) document.getElementById('deck-count-display').innerText = data.deck_count;
     if (data.new_gold !== undefined) document.getElementById('gold-display').innerText = Number(data.new_gold).toLocaleString();
+    if (data.new_mythstone !== undefined) {
+        const mythstoneEl = document.getElementById('mythstone-display');
+        if (mythstoneEl) mythstoneEl.innerText = Number(data.new_mythstone).toLocaleString();
+    }
 }
 
 function updateStatUI(points) {
@@ -385,6 +389,14 @@ function applyRewardUi(data) {
         goldEl.innerText = Number(data.new_gold).toLocaleString();
         if (Number(data.reward_gold || 0) > 0) {
             pulseUiElement(goldEl, 'rgba(255, 213, 79, 0.72)');
+        }
+    }
+
+    if (data.new_mythstone !== undefined) {
+        const mythstoneEl = document.getElementById('mythstone-display');
+        if (mythstoneEl) {
+            mythstoneEl.innerText = Number(data.new_mythstone).toLocaleString();
+            pulseUiElement(mythstoneEl, 'rgba(144, 202, 249, 0.65)');
         }
     }
 
@@ -1968,16 +1980,47 @@ async function synthesizeHero(heroName) {
     }
 }
 
-async function sellMythicHero(heroName) {
-    if (!confirm(`${heroName} 신화 영웅 1기를 판매하고 5,000G를 획득하시겠습니까?`)) return;
+async function confirmSellHero(heroName, sellType) {
+    const sellLabel = (sellType === 'mythstone') ? '신화석 1개' : '골드 5,000G';
+    return confirm(`${heroName} 신화 영웅 1기를 판매하고 ${sellLabel}를 획득하시겠습니까?`);
+}
+
+async function sellHero(heroName, sellType = 'gold') {
+    if (!(await confirmSellHero(heroName, sellType))) return;
     const formData = new URLSearchParams();
     formData.append('hero_name', heroName);
+    formData.append('sell_type', sellType);
     const data = await callApi('sell_hero', { method: 'POST', body: formData });
     if (data && data.status === 'success') {
         addLog(data.msg);
         updateInventoryUI(data);
     } else if (data) {
         addLog('❌ 판매 실패: ' + data.msg, true);
+    }
+}
+
+async function sellMythicHero(heroName) {
+    return sellHero(heroName, 'gold');
+}
+
+async function useMythstone(useType) {
+    const labels = {
+        reroll: '축복 리롤',
+        levelup_skip: '레벨업 가속',
+        slot_extend: '영웅 슬롯 확장'
+    };
+    const label = labels[useType] || useType;
+    if (!confirm(`신화석을 사용해 [${label}] 효과를 적용하시겠습니까?`)) return;
+
+    const formData = new URLSearchParams();
+    formData.append('use_type', useType);
+    const data = await callApi('use_mythstone', { method: 'POST', body: formData });
+    if (data && data.status === 'success') {
+        addLog(data.msg);
+        applyRewardUi(data);
+        await combineHero('view', '');
+    } else if (data) {
+        addLog('❌ 신화석 사용 실패: ' + data.msg, true);
     }
 }
 
@@ -1989,6 +2032,14 @@ async function combineHero(mode, targetName) {
     if (data && data.status === 'success') {
         document.getElementById('combine-list-area').innerHTML = data.html;
         applyButtonTooltips(document.getElementById('combine-list-area'));
+        if (data.new_gold !== undefined) {
+            const goldEl = document.getElementById('gold-display');
+            if (goldEl) goldEl.innerText = Number(data.new_gold).toLocaleString();
+        }
+        if (data.new_mythstone !== undefined) {
+            const mythstoneEl = document.getElementById('mythstone-display');
+            if (mythstoneEl) mythstoneEl.innerText = Number(data.new_mythstone).toLocaleString();
+        }
         if(data.msg) {
             addLog(data.msg);
             toggleEquip(0, -1);
@@ -2332,9 +2383,11 @@ async function toggleEquipItem(itemId, action) {
     }
 }
 
-async function synthesizeEquipment(baseGrade) {
+async function synthesizeEquipment(baseGrade, isBatch = false) {
+    if (isBatch && !confirm(`${baseGrade} 장비를 가능한 횟수만큼 일괄 합성하시겠습니까?`)) return;
     const formData = new URLSearchParams();
     formData.append('base_grade', baseGrade);
+    if (isBatch) formData.append('batch_mode', '1');
     const data = await callApi('item_synthesize', { method: 'POST', body: formData });
     if (data && data.status === 'success') {
         const listArea = document.getElementById('item-list-area');

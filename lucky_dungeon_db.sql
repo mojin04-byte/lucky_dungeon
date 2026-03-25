@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS `tb_commanders` (
   `stat_vit` int(11) DEFAULT '0' COMMENT '체력(내성)',
   `disposition` int(11) DEFAULT '50' COMMENT '성향 (1:극도로 조심 ~ 100:매우 과감)',
   `gold` int(11) DEFAULT '10000' COMMENT '소환 재화',
+  `mythstone` int(11) NOT NULL DEFAULT '0' COMMENT '신화석 재화',
   `current_floor` int(11) DEFAULT '1' COMMENT '현재 층수',
   `background_story` text COMMENT 'AI가 생성한 캐릭터 탄생 설화',
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,

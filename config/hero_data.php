@@ -1024,6 +1024,18 @@ return array (
         'name' => '그림자 분신',
         'description' => '(궁극기) 5초 동안 본체와 동일한 능력을 가진 그림자 분신을 소환합니다.',
         'type' => 'ultimate',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'summon_unit',
+            'unit_name' => '그림자 분신',
+            'count' => 1,
+            'attacks' => 1,
+            'damage_pct' => 90,
+            'duration' => 5,
+          ),
+        ),
       ),
     ),
   ),
@@ -1526,6 +1538,18 @@ return array (
         'description' => '(궁극기) 적 처치 시 100% 확률로 \'임프(방어력 감소 5 보유)\'를 무한대로 소환합니다.',
         'type' => 'ultimate',
         'trigger_chance' => 100,
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'summon_unit',
+            'unit_name' => '임프',
+            'count' => 1,
+            'attacks' => 1,
+            'damage_pct' => 75,
+            'duration' => 8,
+          ),
+        ),
       ),
     ),
   ),
@@ -2247,6 +2271,18 @@ return array (
         'name' => '귀신 분신',
         'description' => '(궁극기) 지속시간이 무제한인 그림자 분신 2개체를 영구히 소환합니다.',
         'type' => 'ultimate',
+        'effects' => 
+        array (
+          0 => 
+          array (
+            'type' => 'summon_unit',
+            'unit_name' => '귀신 분신',
+            'count' => 2,
+            'attacks' => 1,
+            'damage_pct' => 110,
+            'duration' => 999,
+          ),
+        ),
       ),
     ),
   ),

@@ -2396,13 +2396,21 @@ function render_item_bag_html(PDO $pdo, $uid, $gold) {
 	$can_rare = ($grade_counts['희귀'] >= 3) ? '' : 'disabled';
 	$can_epic = ($grade_counts['영웅'] >= 3) ? '' : 'disabled';
 	$can_legend = ($grade_counts['전설'] >= 3) ? '' : 'disabled';
+	$batch_common = (int)floor($grade_counts['일반'] / 3);
+	$batch_rare = (int)floor($grade_counts['희귀'] / 3);
+	$batch_epic = (int)floor($grade_counts['영웅'] / 3);
+	$batch_legend = (int)floor($grade_counts['전설'] / 3);
 	$html .= "<div style='margin-top:8px; padding-top:8px; border-top:1px dashed #444;'>";
 	$html .= "<div style='font-size:0.8rem; color:#b0bec5; margin-bottom:6px;'>동일 등급 장비 3개 합성 -> 상위 등급 1개 무작위 획득</div>";
 	$html .= "<div style='display:flex; gap:6px; flex-wrap:wrap;'>";
 	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#455a64;' {$can_common} onclick=\"synthesizeEquipment('일반')\">일반 3합성 (" . (int)$grade_counts['일반'] . "/3)</button>";
+	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#37474f;' {$can_common} onclick=\"synthesizeEquipment('일반', true)\">일반 일괄합성 ({$batch_common}회)</button>";
 	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#5d4037;' {$can_rare} onclick=\"synthesizeEquipment('희귀')\">희귀 3합성 (" . (int)$grade_counts['희귀'] . "/3)</button>";
+	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#4e342e;' {$can_rare} onclick=\"synthesizeEquipment('희귀', true)\">희귀 일괄합성 ({$batch_rare}회)</button>";
 	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#6a1b9a;' {$can_epic} onclick=\"synthesizeEquipment('영웅')\">영웅 3합성 (" . (int)$grade_counts['영웅'] . "/3)</button>";
+	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#4a148c;' {$can_epic} onclick=\"synthesizeEquipment('영웅', true)\">영웅 일괄합성 ({$batch_epic}회)</button>";
 	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#ad1457;' {$can_legend} onclick=\"synthesizeEquipment('전설')\">전설 3합성 (" . (int)$grade_counts['전설'] . "/3)</button>";
+	$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#880e4f;' {$can_legend} onclick=\"synthesizeEquipment('전설', true)\">전설 일괄합성 ({$batch_legend}회)</button>";
 	$html .= "</div></div>";
 
 	$html .= "</div></div>"; // End Equipment Tab and Section
@@ -2548,7 +2556,10 @@ function generate_hero_lists($heroes, $current_floor = 1) {
 				}
 				if ((string)$h['hero_rank'] === '신화' && (int)$h['quantity'] >= 1) {
 					$hero_name_js = json_encode($h['hero_name']);
-					$card .= "<button class='btn' title='신화 영웅 1기를 판매하여 5,000G 획득' style='padding:5px 10px; font-size:0.8rem; background:#8e24aa;' onclick='sellMythicHero({$hero_name_js})'>판매(5000G)</button>";
+					$card .= "<div style='display:flex; gap:4px; flex-wrap:wrap;'>";
+					$card .= "<button class='btn' title='신화 영웅 1기를 판매하여 5,000G 획득' style='padding:5px 8px; font-size:0.75rem; background:#8e24aa;' onclick='sellHero({$hero_name_js}, \"gold\")'>판매(5000G)</button>";
+					$card .= "<button class='btn' title='신화 영웅 1기를 판매하여 신화석 1개 획득' style='padding:5px 8px; font-size:0.75rem; background:#5e35b1;' onclick='sellHero({$hero_name_js}, \"mythstone\")'>판매(신화석)</button>";
+					$card .= "</div>";
 				}
 				$card .= "</div></div>";
 			}
@@ -2606,6 +2617,7 @@ function apply_dynamic_effect($effect, $skill_def, &$hero, $hero_count, $base_da
 	if (!isset($_SESSION['combat_state']['enemy_freeze_resist_down_pct'])) $_SESSION['combat_state']['enemy_freeze_resist_down_pct'] = 0;
 	if (!isset($_SESSION['combat_state']['hero_distance_bonus_pct']) || !is_array($_SESSION['combat_state']['hero_distance_bonus_pct'])) $_SESSION['combat_state']['hero_distance_bonus_pct'] = array();
 	if (!isset($_SESSION['combat_state']['field_objects']) || !is_array($_SESSION['combat_state']['field_objects'])) $_SESSION['combat_state']['field_objects'] = array();
+	if (!isset($_SESSION['combat_state']['summoned_units']) || !is_array($_SESSION['combat_state']['summoned_units'])) $_SESSION['combat_state']['summoned_units'] = array();
 
 	switch ($type) {
 		case 'add_gold':
@@ -2760,6 +2772,23 @@ function apply_dynamic_effect($effect, $skill_def, &$hero, $hero_count, $base_da
 				'turns_remaining' => $field_turns
 			);
 			$logs[] = "🌪️ <span style='color:#4dd0e1;'>[{$hero_name}]</span> {$skill_name} 장판 생성 ({$field_turns}턴, 틱 {$tick_damage})";
+			break;
+		case 'summon_unit':
+			$unit_name = isset($effect['unit_name']) ? trim((string)$effect['unit_name']) : '소환체';
+			$unit_count = max(1, (int)(isset($effect['count']) ? $effect['count'] : 1));
+			$unit_attacks = max(1, (int)(isset($effect['attacks']) ? $effect['attacks'] : 1));
+			$unit_damage_pct = max(20, (float)(isset($effect['damage_pct']) ? $effect['damage_pct'] : (isset($effect['value']) ? $effect['value'] : 80)));
+			$unit_turns = max(1, (int)ceil($duration > 0 ? $duration : 3));
+			$_SESSION['combat_state']['summoned_units'][] = array(
+				'id' => uniqid('summon_', true),
+				'name' => $unit_name,
+				'source' => $hero_name,
+				'count' => $unit_count,
+				'attacks_per_turn' => $unit_attacks,
+				'damage_pct' => $unit_damage_pct,
+				'turns_remaining' => $unit_turns
+			);
+			$logs[] = "👥 <span style='color:#ce93d8;'>[{$hero_name}]</span> {$unit_name} {$unit_count}체 소환 ({$unit_turns}턴)";
 			break;
 		case 'conditional_damage_when_stun':
 			// 적이 기절 상태일 때 추가 피해 증소
@@ -2972,6 +3001,61 @@ function process_field_objects_turn(&$cmd, &$new_mob_hp, &$logs) {
 	$_SESSION['combat_state']['field_objects'] = $next_objects;
 	$_SESSION['combat_state']['enemy_field_slow_flat'] = $field_slow_max;
 	$_SESSION['combat_state']['enemy_pull_power'] = $pull_power_max;
+}
+
+function process_summoned_units_turn(&$cmd, &$new_mob_hp, &$logs) {
+	if (!isset($_SESSION['combat_state']) || !is_array($_SESSION['combat_state'])) return;
+	if (!isset($_SESSION['combat_state']['summoned_units']) || !is_array($_SESSION['combat_state']['summoned_units'])) {
+		$_SESSION['combat_state']['summoned_units'] = array();
+	}
+
+	$next_units = array();
+	$is_boss = (strpos((string)(isset($cmd['mob_name']) ? $cmd['mob_name'] : ''), '[보스]') !== false);
+	$floor = max(1, (int)(isset($cmd['current_floor']) ? $cmd['current_floor'] : 1));
+	$stat_str = max(0, (int)(isset($cmd['stat_str']) ? $cmd['stat_str'] : 0));
+	$stat_mag = max(0, (int)(isset($cmd['stat_mag']) ? $cmd['stat_mag'] : 0));
+	$stat_agi = max(0, (int)(isset($cmd['stat_agi']) ? $cmd['stat_agi'] : 0));
+	$level = max(1, (int)(isset($cmd['level']) ? $cmd['level'] : 1));
+	$commander_power = max(10, (int)floor(($stat_str * 1.2) + ($stat_mag * 1.2) + ($stat_agi * 0.8) + ($level * 1.5)));
+
+	foreach ($_SESSION['combat_state']['summoned_units'] as $unit) {
+		if (!is_array($unit)) continue;
+		$turns_left = isset($unit['turns_remaining']) ? (int)$unit['turns_remaining'] : 0;
+		if ($turns_left <= 0) continue;
+
+		$unit_name = isset($unit['name']) ? (string)$unit['name'] : '소환체';
+		$source = isset($unit['source']) ? (string)$unit['source'] : '소환사';
+		$count = max(1, (int)(isset($unit['count']) ? $unit['count'] : 1));
+		$attacks = max(1, (int)(isset($unit['attacks_per_turn']) ? $unit['attacks_per_turn'] : 1));
+		$damage_pct = max(20.0, (float)(isset($unit['damage_pct']) ? $unit['damage_pct'] : 80.0));
+
+		$total_hits = min(12, $count * $attacks);
+		$unit_total_damage = 0;
+		for ($hit = 0; $hit < $total_hits; $hit++) {
+			if ($new_mob_hp <= 0) break;
+			$base = max(8, (int)floor(($commander_power * 0.32) + ($floor * 0.5)));
+			$var = rand(92, 108) / 100.0;
+			$dmg = max(1, (int)floor($base * ($damage_pct / 100.0) * $var));
+			if ($is_boss) $dmg = max(1, (int)floor($dmg * 0.85));
+			$applied = min($new_mob_hp, $dmg);
+			$new_mob_hp = max(0, $new_mob_hp - $applied);
+			$unit_total_damage += $applied;
+		}
+
+		if ($unit_total_damage > 0) {
+			$logs[] = "👥 <span style='color:#ce93d8;'>[{$source}]</span> {$unit_name}가 {$total_hits}회 타격해 <b>{$unit_total_damage}</b> 피해";
+		}
+
+		$turns_left -= 1;
+		if ($turns_left > 0) {
+			$unit['turns_remaining'] = $turns_left;
+			$next_units[] = $unit;
+		} else {
+			$logs[] = "🫥 <span style='color:#b39ddb;'>[{$source}]</span> {$unit_name} 소환이 종료되었습니다.";
+		}
+	}
+
+	$_SESSION['combat_state']['summoned_units'] = $next_units;
 }
 
 function sanitize_event_title($title) {
@@ -3613,6 +3697,7 @@ function handle_combat(PDO $pdo) {
 		
 		$new_mob_hp = (int)$cmd['mob_hp'];
 		process_field_objects_turn($cmd, $new_mob_hp, $logs);
+		process_summoned_units_turn($cmd, $new_mob_hp, $logs);
 		$new_hp = (int)$cmd['hp'];
 		$new_mp = (int)$cmd['mp'];
 		$turn_hp_before = $new_hp;
@@ -4525,6 +4610,7 @@ function handle_skill(PDO $pdo) {
 		$logs = array("🔮 <b>[{$skill['name']}]</b> 시전! ({$cost_text})");
 		if ($is_in_combat) {
 			process_field_objects_turn($cmd, $new_mob_hp, $logs);
+			process_summoned_units_turn($cmd, $new_mob_hp, $logs);
 		}
 		if ($is_in_combat && isset($_SESSION['combat_state']['persistent_armor_debuffs']) && is_array($_SESSION['combat_state']['persistent_armor_debuffs'])) {
 			foreach ($_SESSION['combat_state']['persistent_armor_debuffs'] as $debuff_id => $debuff_info) {
@@ -5214,9 +5300,12 @@ function handle_sell_hero(PDO $pdo) {
 	app_log('handle_sell_hero.start');
 	$uid = get_uid_or_fail();
 	$hero_name = isset($_POST['hero_name']) ? trim((string)$_POST['hero_name']) : '';
+	$sell_type = isset($_POST['sell_type']) ? trim((string)$_POST['sell_type']) : 'gold';
 	if ($hero_name === '') { json_error('판매할 영웅 이름이 필요합니다.'); return; }
+	if (!in_array($sell_type, array('gold', 'mythstone'), true)) { json_error('잘못된 판매 타입입니다.'); return; }
 
 	$gold_reward = 5000;
+	$mythstone_reward = 1;
 	try {
 		$pdo->beginTransaction();
 
@@ -5233,13 +5322,20 @@ function handle_sell_hero(PDO $pdo) {
 			$pdo->prepare("DELETE FROM tb_heroes WHERE inv_id = ?")->execute(array($source['inv_id']));
 		}
 
-		$cmd_st = $pdo->prepare("SELECT gold, current_floor FROM tb_commanders WHERE uid = ? FOR UPDATE");
+		$cmd_st = $pdo->prepare("SELECT gold, mythstone, current_floor FROM tb_commanders WHERE uid = ? FOR UPDATE");
 		$cmd_st->execute(array($uid));
 		$cmd = $cmd_st->fetch();
 		if (!$cmd) throw new Exception('사령관 정보를 찾을 수 없습니다.');
 
-		$new_gold = (int)$cmd['gold'] + $gold_reward;
-		$pdo->prepare("UPDATE tb_commanders SET gold = ? WHERE uid = ?")->execute(array($new_gold, $uid));
+		$new_gold = (int)$cmd['gold'];
+		$new_mythstone = (int)$cmd['mythstone'];
+		if ($sell_type === 'mythstone') {
+			$new_mythstone += $mythstone_reward;
+			$pdo->prepare("UPDATE tb_commanders SET mythstone = ? WHERE uid = ?")->execute(array($new_mythstone, $uid));
+		} else {
+			$new_gold += $gold_reward;
+			$pdo->prepare("UPDATE tb_commanders SET gold = ? WHERE uid = ?")->execute(array($new_gold, $uid));
+		}
 
 		$all = $pdo->prepare("SELECT * FROM tb_heroes WHERE uid = ? AND quantity > 0 ORDER BY is_equipped DESC, hero_rank DESC, hero_name ASC");
 		$all->execute(array($uid));
@@ -5247,16 +5343,21 @@ function handle_sell_hero(PDO $pdo) {
 		$current_floor = max(1, (int)(isset($cmd['current_floor']) ? $cmd['current_floor'] : 1));
 		list($deck_html, $inv_html, $deck_count, $deck_synergy_html) = generate_hero_lists($heroes, $current_floor);
 
-		$trace_msg = "💰 신화 영웅 판매: {$hero_name} x1 -> +{$gold_reward}G";
+		$trace_msg = ($sell_type === 'mythstone')
+			? "💎 신화 영웅 판매: {$hero_name} x1 -> +{$mythstone_reward} 신화석"
+			: "💰 신화 영웅 판매: {$hero_name} x1 -> +{$gold_reward}G";
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $trace_msg));
 		$pdo->commit();
 
 		$cap = get_hero_capacity_snapshot($pdo, $uid);
-		$msg = "💰 <b>{$hero_name}</b> 판매 완료! <span style='color:#ffd54f;'>+{$gold_reward}G</span>";
+		$msg = ($sell_type === 'mythstone')
+			? "💎 <b>{$hero_name}</b> 판매 완료! <span style='color:#90caf9;'>+{$mythstone_reward} 신화석</span>"
+			: "💰 <b>{$hero_name}</b> 판매 완료! <span style='color:#ffd54f;'>+{$gold_reward}G</span>";
 		echo json_encode(array(
 			'status' => 'success',
 			'msg' => $msg,
 			'new_gold' => $new_gold,
+			'new_mythstone' => $new_mythstone,
 			'deck_html' => $deck_html,
 			'inv_html' => $inv_html,
 			'deck_count' => $deck_count,
@@ -5264,6 +5365,97 @@ function handle_sell_hero(PDO $pdo) {
 			'hero_owned' => $cap['hero_owned'],
 			'hero_limit' => $cap['hero_limit']
 		));
+	} catch (Exception $e) {
+		if ($pdo->inTransaction()) $pdo->rollBack();
+		json_error($e->getMessage());
+	}
+}
+
+function handle_use_mythstone(PDO $pdo) {
+	app_log('handle_use_mythstone.start');
+	$uid = get_uid_or_fail();
+	$use_type = isset($_POST['use_type']) ? trim((string)$_POST['use_type']) : '';
+	$cost_map = array(
+		'reroll' => 1,
+		'levelup_skip' => 2,
+		'slot_extend' => 3,
+	);
+	if (!isset($cost_map[$use_type])) {
+		json_error('지원하지 않는 신화석 사용 타입입니다.');
+		return;
+	}
+
+	try {
+		$pdo->beginTransaction();
+		$cmd_st = $pdo->prepare("SELECT * FROM tb_commanders WHERE uid = ? FOR UPDATE");
+		$cmd_st->execute(array($uid));
+		$cmd = $cmd_st->fetch();
+		if (!$cmd) throw new Exception('사령관 정보를 찾을 수 없습니다.');
+
+		$cost = (int)$cost_map[$use_type];
+		$current_mythstone = max(0, (int)$cmd['mythstone']);
+		if ($current_mythstone < $cost) {
+			throw new Exception("신화석이 부족합니다. (필요: {$cost}, 보유: {$current_mythstone})");
+		}
+
+		$new_mythstone = $current_mythstone - $cost;
+		$pdo->prepare("UPDATE tb_commanders SET mythstone = ? WHERE uid = ?")->execute(array($new_mythstone, $uid));
+
+		$msg = '';
+		$response = array(
+			'status' => 'success',
+			'new_gold' => (int)$cmd['gold'],
+			'new_mythstone' => $new_mythstone,
+		);
+
+		if ($use_type === 'reroll') {
+			$blessing = get_or_create_commander_blessing_state($pdo, $uid);
+			$reroll_count = isset($blessing['reroll_count']) ? (int)$blessing['reroll_count'] : 0;
+			$new_blessing = roll_random_blessing((int)$cmd['current_floor'], $reroll_count + 1);
+			$pdo->prepare("UPDATE tb_commander_blessings SET blessing_type = ?, blessing_value = ?, reroll_count = ? WHERE uid = ?")
+				->execute(array($new_blessing['blessing_type'], $new_blessing['blessing_value'], $reroll_count + 1, $uid));
+			$meta = get_blessing_meta($new_blessing['blessing_type'], $new_blessing['blessing_value']);
+			$label = isset($meta['name']) ? $meta['name'] : $new_blessing['blessing_type'];
+			$msg = "💎 신화석 사용! 축복 리롤 완료: <b>{$label}</b> +{$new_blessing['blessing_value']}%";
+			$response['blessing_type'] = $new_blessing['blessing_type'];
+			$response['blessing_label'] = $label;
+			$response['blessing_value'] = $new_blessing['blessing_value'];
+			$response['reroll_count'] = $reroll_count + 1;
+		} elseif ($use_type === 'levelup_skip') {
+			$current_level = max(1, (int)$cmd['level']);
+			if ($current_level >= 1000) throw new Exception('이미 최대 레벨입니다.');
+			$need_exp = get_required_exp_for_next_level($current_level);
+			$progress = apply_commander_exp_gain($pdo, $uid, $cmd, $need_exp);
+			$new_level = (int)$progress['level'];
+			$msg = "💎 신화석 사용! 레벨업 가속 발동: Lv.{$current_level} → Lv.{$new_level}";
+			$response['new_level'] = $new_level;
+			$response['new_exp'] = (int)$progress['exp'];
+			$response['exp_to_next'] = (int)$progress['exp_to_next'];
+			$response['stat_points'] = (int)$progress['stat_points'];
+			$response['new_hp'] = (int)$progress['hp'];
+			$response['max_hp'] = (int)$progress['max_hp'];
+			$response['new_mp'] = (int)$progress['mp'];
+			$response['max_mp'] = (int)$progress['max_mp'];
+			$response['levelup_logs'] = $progress['levelup_logs'];
+			$response['levelup_count'] = count($progress['levelup_logs']);
+		} elseif ($use_type === 'slot_extend') {
+			$prog = get_or_create_commander_progression_state($pdo, $uid);
+			$current_tier = max(0, (int)(isset($prog['hero_capacity_tier']) ? $prog['hero_capacity_tier'] : 0));
+			if ($current_tier >= 30) throw new Exception('영웅 보유 한도는 이미 최대치입니다.');
+			$new_tier = $current_tier + 1;
+			$pdo->prepare("UPDATE tb_commander_progression SET hero_capacity_tier = ? WHERE uid = ?")
+				->execute(array($new_tier, $uid));
+			$new_limit = get_hero_capacity_limit_by_progression(array_merge($prog, array('hero_capacity_tier' => $new_tier)));
+			$owned = get_total_hero_units($pdo, $uid);
+			$msg = "💎 신화석 사용! 용병 수송 마차 강화: 영웅 한도 {$new_limit}명";
+			$response['hero_limit'] = $new_limit;
+			$response['hero_owned'] = $owned;
+		}
+
+		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $msg));
+		$pdo->commit();
+		$response['msg'] = $msg;
+		echo json_encode($response);
 	} catch (Exception $e) {
 		if ($pdo->inTransaction()) $pdo->rollBack();
 		json_error($e->getMessage());
@@ -5496,8 +5688,26 @@ function handle_combine(PDO $pdo) {
 		return has_owned_hero_by_names($pdo, $uid, $get_aliases($name));
 	};
 
-	$render_view = function() use ($mythic_recipes, $evolution_recipes, $evolution_requirements, $fetch_available_count, $fetch_max_battle_count, $owns_singleton_target) {
-		$html = '<div style="background:#222; padding:15px; border-radius:5px; margin-bottom:20px;">';
+	$render_view = function() use ($pdo, $uid, $mythic_recipes, $evolution_recipes, $evolution_requirements, $fetch_available_count, $fetch_max_battle_count, $owns_singleton_target) {
+		$ms_st = $pdo->prepare("SELECT mythstone FROM tb_commanders WHERE uid = ? LIMIT 1");
+		$ms_st->execute(array($uid));
+		$mythstone = (int)$ms_st->fetchColumn();
+		$cost_reroll = 1;
+		$cost_levelup = 2;
+		$cost_slot = 3;
+		$disabled_reroll = ($mythstone < $cost_reroll) ? 'disabled' : '';
+		$disabled_levelup = ($mythstone < $cost_levelup) ? 'disabled' : '';
+		$disabled_slot = ($mythstone < $cost_slot) ? 'disabled' : '';
+
+		$html = '<div style="background:#1f2230; padding:12px; border-radius:6px; margin-bottom:12px; border:1px solid #3949ab;">';
+		$html .= "<div style='color:#90caf9; font-size:0.9rem; margin-bottom:8px;'>💎 보유 신화석: <b>{$mythstone}</b></div>";
+		$html .= "<div style='display:flex; gap:6px; flex-wrap:wrap;'>";
+		$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#3949ab;' {$disabled_reroll} onclick=\"useMythstone('reroll')\">축복 리롤 ({$cost_reroll})</button>";
+		$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#303f9f;' {$disabled_levelup} onclick=\"useMythstone('levelup_skip')\">레벨업 가속 ({$cost_levelup})</button>";
+		$html .= "<button class='btn' style='padding:6px 10px; font-size:0.8rem; background:#283593;' {$disabled_slot} onclick=\"useMythstone('slot_extend')\">영웅 슬롯 확장 ({$cost_slot})</button>";
+		$html .= "</div></div>";
+
+		$html .= '<div style="background:#222; padding:15px; border-radius:5px; margin-bottom:20px;">';
 		$html .= '<h3 style="color:#ff5252; margin-top:0;">신화 조합 (레시피)</h3>';
 		$html .= '<p style="color:#ccc; font-size:0.9rem;">출전/파견 중이 아닌 재료 영웅을 소모해 대상 신화를 직접 조합합니다.</p>';
 		foreach ($mythic_recipes as $mythic => $info) {
@@ -5564,7 +5774,10 @@ function handle_combine(PDO $pdo) {
 
 	try {
 		if ($mode === 'view') {
-			echo json_encode(array('status' => 'success', 'html' => $render_view()));
+			$g_st = $pdo->prepare("SELECT gold, mythstone FROM tb_commanders WHERE uid = ? LIMIT 1");
+			$g_st->execute(array($uid));
+			$cmd_res = $g_st->fetch();
+			echo json_encode(array('status' => 'success', 'html' => $render_view(), 'new_gold' => (int)$cmd_res['gold'], 'new_mythstone' => (int)$cmd_res['mythstone']));
 			return;
 		}
 
@@ -5619,7 +5832,10 @@ function handle_combine(PDO $pdo) {
 			$pdo->commit();
 
 			$msg = "✨ 조합 성공! (" . implode(' + ', $used_text) . ") → <span style='color:#ff5252; font-weight:bold;'>[신화] {$new_name}</span> 획득!";
-			echo json_encode(array('status' => 'success', 'msg' => $msg, 'new_rank' => '신화', 'new_name' => $new_name, 'html' => $render_view()));
+			$g_st = $pdo->prepare("SELECT gold, mythstone FROM tb_commanders WHERE uid = ? LIMIT 1");
+			$g_st->execute(array($uid));
+			$cmd_res = $g_st->fetch();
+			echo json_encode(array('status' => 'success', 'msg' => $msg, 'new_rank' => '신화', 'new_name' => $new_name, 'html' => $render_view(), 'new_gold' => (int)$cmd_res['gold'], 'new_mythstone' => (int)$cmd_res['mythstone']));
 			return;
 		}
 
@@ -5659,7 +5875,10 @@ function handle_combine(PDO $pdo) {
 			$pdo->commit();
 
 			$msg = "🔮 <span style='color:#ff5252;'>{$target_name}</span> → <span style='color:#ffeb3b; font-weight:bold;'>[불멸] {$evolved_name}</span> 진화!";
-			echo json_encode(array('status' => 'success', 'msg' => $msg, 'new_rank' => '불멸', 'new_name' => $evolved_name, 'html' => $render_view()));
+			$g_st = $pdo->prepare("SELECT gold, mythstone FROM tb_commanders WHERE uid = ? LIMIT 1");
+			$g_st->execute(array($uid));
+			$cmd_res = $g_st->fetch();
+			echo json_encode(array('status' => 'success', 'msg' => $msg, 'new_rank' => '불멸', 'new_name' => $evolved_name, 'html' => $render_view(), 'new_gold' => (int)$cmd_res['gold'], 'new_mythstone' => (int)$cmd_res['mythstone']));
 			return;
 		}
 
@@ -6287,6 +6506,7 @@ function handle_item_synthesize(PDO $pdo) {
 	app_log('handle_item_synthesize.start');
 	$uid = get_uid_or_fail();
 	$base_grade = isset($_POST['base_grade']) ? trim((string)$_POST['base_grade']) : '';
+	$batch_mode = isset($_POST['batch_mode']) && ((string)$_POST['batch_mode'] === '1');
 	$catalog = get_item_system_catalog();
 	$chain = isset($catalog['synthesis_chain']) ? $catalog['synthesis_chain'] : array();
 	if (!isset($chain[$base_grade])) {
@@ -6300,12 +6520,15 @@ function handle_item_synthesize(PDO $pdo) {
 		$eq_st = $pdo->prepare("SELECT item_id FROM tb_items WHERE uid = ? AND category = 'equipment' AND item_grade = ? AND is_equipped = 0 FOR UPDATE");
 		$eq_st->execute(array($uid, $base_grade));
 		$rows = $eq_st->fetchAll();
-		if (count($rows) < 3) throw new Exception("{$base_grade} 등급 장비가 3개 이상 필요합니다.");
+		$available = count($rows);
+		if ($available < 3) throw new Exception("{$base_grade} 등급 장비가 3개 이상 필요합니다.");
+		$synth_count = $batch_mode ? (int)floor($available / 3) : 1;
+		if ($synth_count < 1) throw new Exception("{$base_grade} 등급 장비가 3개 이상 필요합니다.");
 
 		$ids = array();
 		foreach ($rows as $r) $ids[] = (int)$r['item_id'];
 		shuffle($ids);
-		$consume_ids = array_slice($ids, 0, 3);
+		$consume_ids = array_slice($ids, 0, $synth_count * 3);
 
 		$del = $pdo->prepare("DELETE FROM tb_items WHERE item_id = ? AND uid = ?");
 		foreach ($consume_ids as $cid) {
@@ -6318,11 +6541,24 @@ function handle_item_synthesize(PDO $pdo) {
 		$floor = $cmd ? (int)$cmd['current_floor'] : 1;
 		$gold = $cmd ? (int)$cmd['gold'] : 0;
 
-		$equipment = roll_equipment_by_grade($next_grade, $floor);
-		if (!$equipment) throw new Exception('합성 결과 장비 생성에 실패했습니다.');
-		grant_equipment_item($pdo, $uid, $equipment);
+		$obtained_names = array();
+		for ($i = 0; $i < $synth_count; $i++) {
+			$equipment = roll_equipment_by_grade($next_grade, $floor);
+			if (!$equipment) throw new Exception('합성 결과 장비 생성에 실패했습니다.');
+			grant_equipment_item($pdo, $uid, $equipment);
+			$obtained_names[] = (string)$equipment['item_name'];
+		}
 
-		$msg = "🔧 {$base_grade} 장비 3개를 합성해 <b>{$equipment['item_name']}</b> 획득!";
+		if ($synth_count === 1) {
+			$msg = "🔧 {$base_grade} 장비 3개를 합성해 <b>{$obtained_names[0]}</b> 획득!";
+		} else {
+			$preview = array_slice($obtained_names, 0, 3);
+			$preview_text = implode(', ', $preview);
+			if (count($obtained_names) > 3) {
+				$preview_text .= ' 외 ' . (count($obtained_names) - 3) . '개';
+			}
+			$msg = "⚙️ {$base_grade} 장비 일괄합성 {$synth_count}회 완료! <b>{$preview_text}</b> 획득";
+		}
 		$pdo->prepare("INSERT INTO tb_logs (uid, log_text) VALUES (?, ?)")->execute(array($uid, $msg));
 		$pdo->commit();
 
@@ -6574,6 +6810,7 @@ switch ($action) {
 	case 'item_toggle_equip': handle_item_toggle_equip($pdo); break;
 	case 'item_synthesize': handle_item_synthesize($pdo); break;
 	case 'sell_hero': handle_sell_hero($pdo); break;
+	case 'use_mythstone': handle_use_mythstone($pdo); break;
 	case 'progression_upgrade': handle_progression_upgrade($pdo); break;
 	case 'blessing_reroll': handle_blessing_reroll($pdo); break;
 	case 'get_progression_state': handle_get_progression_state($pdo); break;

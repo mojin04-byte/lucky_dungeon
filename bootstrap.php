@@ -208,6 +208,9 @@ try {
     if (!column_exists($pdo, 'tb_commanders', 'reincarnation_stat_bonus')) {
         $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `reincarnation_stat_bonus` INT NOT NULL DEFAULT 0 COMMENT '환생 누적 스탯 보너스'");
     }
+    if (!column_exists($pdo, 'tb_commanders', 'mythstone')) {
+        $pdo->exec("ALTER TABLE `tb_commanders` ADD COLUMN `mythstone` INT NOT NULL DEFAULT 0 COMMENT '신화석 재화'");
+    }
     if (column_exists($pdo, 'tb_commanders', 'lifetime_gold_earned')) {
         $pdo->exec("UPDATE `tb_commanders` SET `lifetime_gold_earned` = GREATEST(`lifetime_gold_earned`, `gold`) WHERE `lifetime_gold_earned` = 0 AND `gold` > 0");
     }
